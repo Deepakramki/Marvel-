@@ -1,4 +1,4 @@
-// Copyright (C) 2019-2021, Ava Labs, Inc. All rights reserved.
+// Copyright (C) 2019-2022, Ava Labs, Inc. All rights reserved.
 // See the file LICENSE for licensing terms.
 
 package validators
@@ -16,7 +16,7 @@ var (
 	errGetValidatorSet = errors.New("unexpectedly called GetValidatorSet")
 )
 
-var _ State = &TestState{}
+var _ State = (*TestState)(nil)
 
 type TestState struct {
 	T *testing.T
@@ -27,7 +27,7 @@ type TestState struct {
 
 	GetMinimumHeightF func() (uint64, error)
 	GetCurrentHeightF func() (uint64, error)
-	GetValidatorSetF  func(height uint64, subnetID ids.ID) (map[ids.ShortID]uint64, error)
+	GetValidatorSetF  func(height uint64, subnetID ids.ID) (map[ids.NodeID]uint64, error)
 }
 
 func (vm *TestState) GetMinimumHeight() (uint64, error) {
@@ -50,7 +50,7 @@ func (vm *TestState) GetCurrentHeight() (uint64, error) {
 	return 0, errCurrentHeight
 }
 
-func (vm *TestState) GetValidatorSet(height uint64, subnetID ids.ID) (map[ids.ShortID]uint64, error) {
+func (vm *TestState) GetValidatorSet(height uint64, subnetID ids.ID) (map[ids.NodeID]uint64, error) {
 	if vm.GetValidatorSetF != nil {
 		return vm.GetValidatorSetF(height, subnetID)
 	}

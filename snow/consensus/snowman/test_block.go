@@ -1,4 +1,4 @@
-// Copyright (C) 2019-2021, Ava Labs, Inc. All rights reserved.
+// Copyright (C) 2019-2022, Ava Labs, Inc. All rights reserved.
 // See the file LICENSE for licensing terms.
 
 package snowman
@@ -11,7 +11,7 @@ import (
 	"github.com/ava-labs/avalanchego/snow/choices"
 )
 
-var _ Block = &TestBlock{}
+var _ Block = (*TestBlock)(nil)
 
 // TestBlock is a useful test block
 type TestBlock struct {

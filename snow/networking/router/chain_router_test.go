@@ -1,16 +1,19 @@
-// Copyright (C) 2019-2021, Ava Labs, Inc. All rights reserved.
+// Copyright (C) 2019-2022, Ava Labs, Inc. All rights reserved.
 // See the file LICENSE for licensing terms.
 
 package router
 
 import (
+	"context"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/stretchr/testify/assert"
 
+	"github.com/stretchr/testify/require"
+
+	"github.com/ava-labs/avalanchego/api/metrics"
 	"github.com/ava-labs/avalanchego/ids"
 	"github.com/ava-labs/avalanchego/message"
 	"github.com/ava-labs/avalanchego/snow"
@@ -18,16 +21,19 @@ import (
 	"github.com/ava-labs/avalanchego/snow/networking/benchlist"
 	"github.com/ava-labs/avalanchego/snow/networking/handler"
 	"github.com/ava-labs/avalanchego/snow/networking/timeout"
+	"github.com/ava-labs/avalanchego/snow/networking/tracker"
 	"github.com/ava-labs/avalanchego/snow/validators"
 	"github.com/ava-labs/avalanchego/utils/logging"
+	"github.com/ava-labs/avalanchego/utils/math/meter"
+	"github.com/ava-labs/avalanchego/utils/resource"
 	"github.com/ava-labs/avalanchego/utils/timer"
 	"github.com/ava-labs/avalanchego/version"
 )
 
 func TestShutdown(t *testing.T) {
 	vdrs := validators.NewSet()
-	err := vdrs.AddWeight(ids.GenerateTestShortID(), 1)
-	assert.NoError(t, err)
+	err := vdrs.AddWeight(ids.GenerateTestNodeID(), 1)
+	require.NoError(t, err)
 	benchlist := benchlist.NewNoBenchlist()
 	tm, err := timeout.NewManager(
 		&timer.AdaptiveTimeoutConfig{
@@ -41,31 +47,43 @@ func TestShutdown(t *testing.T) {
 		"",
 		prometheus.NewRegistry(),
 	)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	go tm.Dispatch()
 
 	chainRouter := ChainRouter{}
-	metrics := prometheus.NewRegistry()
-	mc, err := message.NewCreator(metrics, true, "dummyNamespace", 10*time.Second)
-	assert.NoError(t, err)
-
-	err = chainRouter.Initialize(ids.ShortEmpty, logging.NoLog{}, mc, tm, time.Second, ids.Set{}, nil, HealthConfig{}, "", prometheus.NewRegistry())
-	assert.NoError(t, err)
+	err = chainRouter.Initialize(
+		ids.EmptyNodeID,
+		logging.NoLog{},
+		tm,
+		time.Second,
+		ids.Set{},
+		ids.Set{},
+		nil,
+		HealthConfig{},
+		"",
+		prometheus.NewRegistry(),
+	)
+	require.NoError(t, err)
 
 	shutdownCalled := make(chan struct{}, 1)
 
 	ctx := snow.DefaultConsensusContextTest()
+	resourceTracker, err := tracker.NewResourceTracker(
+		prometheus.NewRegistry(),
+		resource.NoUsage,
+		meter.ContinuousFactory{},
+		time.Second,
+	)
+	require.NoError(t, err)
 	handler, err := handler.New(
-		mc,
 		ctx,
 		vdrs,
 		nil,
 		nil,
 		time.Second,
+		resourceTracker,
 	)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	bootstrapper := &common.BootstrapperTest{
 		BootstrapableTest: common.BootstrapableTest{
@@ -79,7 +97,7 @@ func TestShutdown(t *testing.T) {
 	bootstrapper.CantGossip = false
 	bootstrapper.ContextF = func() *snow.ConsensusContext { return ctx }
 	bootstrapper.ShutdownF = func() error { shutdownCalled <- struct{}{}; return nil }
-	bootstrapper.ConnectedF = func(nodeID ids.ShortID, nodeVersion version.Application) error { return nil }
+	bootstrapper.ConnectedF = func(nodeID ids.NodeID, nodeVersion *version.Application) error { return nil }
 	bootstrapper.HaltF = func() {}
 	handler.SetBootstrapper(bootstrapper)
 
@@ -88,13 +106,16 @@ func TestShutdown(t *testing.T) {
 	engine.CantGossip = false
 	engine.ContextF = func() *snow.ConsensusContext { return ctx }
 	engine.ShutdownF = func() error { shutdownCalled <- struct{}{}; return nil }
-	engine.ConnectedF = func(nodeID ids.ShortID, nodeVersion version.Application) error { return nil }
+	engine.ConnectedF = func(nodeID ids.NodeID, nodeVersion *version.Application) error { return nil }
 	engine.HaltF = func() {}
 	handler.SetConsensus(engine)
 	ctx.SetState(snow.NormalOp) // assumed bootstrap is done
 
 	chainRouter.AddChain(handler)
+
+	bootstrapper.StartF = func(startReqID uint32) error { return nil }
 	handler.Start(false)
+
 	chainRouter.Shutdown()
 
 	ticker := time.NewTicker(250 * time.Millisecond)
@@ -112,10 +133,10 @@ func TestShutdown(t *testing.T) {
 }
 
 func TestShutdownTimesOut(t *testing.T) {
-	nodeID := ids.ShortEmpty
+	nodeID := ids.EmptyNodeID
 	vdrs := validators.NewSet()
-	err := vdrs.AddWeight(ids.GenerateTestShortID(), 1)
-	assert.NoError(t, err)
+	err := vdrs.AddWeight(ids.GenerateTestNodeID(), 1)
+	require.NoError(t, err)
 	benchlist := benchlist.NewNoBenchlist()
 	metrics := prometheus.NewRegistry()
 	// Ensure that the Ancestors request does not timeout
@@ -131,39 +152,45 @@ func TestShutdownTimesOut(t *testing.T) {
 		"",
 		metrics,
 	)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	go tm.Dispatch()
 
 	chainRouter := ChainRouter{}
 
-	mc, err := message.NewCreator(metrics, true, "dummyNamespace", 10*time.Second)
-	assert.NoError(t, err)
+	mc, err := message.NewCreator(metrics, "dummyNamespace", true, 10*time.Second)
+	require.NoError(t, err)
 
-	err = chainRouter.Initialize(ids.ShortEmpty,
+	err = chainRouter.Initialize(
+		ids.EmptyNodeID,
 		logging.NoLog{},
-		mc,
 		tm,
 		time.Millisecond,
+		ids.Set{},
 		ids.Set{},
 		nil,
 		HealthConfig{},
 		"",
 		metrics,
 	)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	ctx := snow.DefaultConsensusContextTest()
+	resourceTracker, err := tracker.NewResourceTracker(
+		prometheus.NewRegistry(),
+		resource.NoUsage,
+		meter.ContinuousFactory{},
+		time.Second,
+	)
+	require.NoError(t, err)
 	handler, err := handler.New(
-		mc,
 		ctx,
 		vdrs,
 		nil,
 		nil,
 		time.Second,
+		resourceTracker,
 	)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	bootstrapFinished := make(chan struct{}, 1)
 	bootstrapper := &common.BootstrapperTest{
@@ -177,9 +204,9 @@ func TestShutdownTimesOut(t *testing.T) {
 	bootstrapper.Default(true)
 	bootstrapper.CantGossip = false
 	bootstrapper.ContextF = func() *snow.ConsensusContext { return ctx }
-	bootstrapper.ConnectedF = func(nodeID ids.ShortID, nodeVersion version.Application) error { return nil }
+	bootstrapper.ConnectedF = func(nodeID ids.NodeID, nodeVersion *version.Application) error { return nil }
 	bootstrapper.HaltF = func() {}
-	bootstrapper.AncestorsF = func(nodeID ids.ShortID, requestID uint32, containers [][]byte) error {
+	bootstrapper.PullQueryF = func(context.Context, ids.NodeID, uint32, ids.ID) error {
 		// Ancestors blocks for two seconds
 		time.Sleep(2 * time.Second)
 		bootstrapFinished <- struct{}{}
@@ -196,14 +223,16 @@ func TestShutdownTimesOut(t *testing.T) {
 	ctx.SetState(snow.NormalOp) // assumed bootstrapping is done
 
 	chainRouter.AddChain(handler)
+
+	bootstrapper.StartF = func(startReqID uint32) error { return nil }
 	handler.Start(false)
 
 	shutdownFinished := make(chan struct{}, 1)
 
 	go func() {
 		chainID := ids.ID{}
-		msg := mc.InboundAncestors(chainID, 1, nil, nodeID)
-		handler.Push(msg)
+		msg := mc.InboundPullQuery(chainID, 1, time.Hour, ids.GenerateTestID(), nodeID)
+		handler.Push(context.Background(), msg)
 
 		time.Sleep(50 * time.Millisecond) // Pause to ensure message gets processed
 
@@ -220,6 +249,7 @@ func TestShutdownTimesOut(t *testing.T) {
 
 // Ensure that a timeout fires if we don't get a response to a request
 func TestRouterTimeout(t *testing.T) {
+	r := require.New(t)
 	// Create a timeout manager
 	maxTimeout := 25 * time.Millisecond
 	tm, err := timeout.NewManager(
@@ -234,43 +264,60 @@ func TestRouterTimeout(t *testing.T) {
 		"",
 		prometheus.NewRegistry(),
 	)
-	if err != nil {
-		t.Fatal(err)
-	}
+	r.NoError(err)
 	go tm.Dispatch()
 
 	// Create a router
 	chainRouter := ChainRouter{}
-	metrics := prometheus.NewRegistry()
-	mc, err := message.NewCreator(metrics, true, "dummyNamespace", 10*time.Second)
-	assert.NoError(t, err)
 
-	err = chainRouter.Initialize(ids.ShortEmpty, logging.NoLog{}, mc, tm, time.Millisecond, ids.Set{}, nil, HealthConfig{}, "", prometheus.NewRegistry())
-	assert.NoError(t, err)
+	err = chainRouter.Initialize(
+		ids.EmptyNodeID,
+		logging.NoLog{},
+		tm,
+		time.Millisecond,
+		ids.Set{},
+		ids.Set{},
+		nil,
+		HealthConfig{},
+		"",
+		prometheus.NewRegistry(),
+	)
+	r.NoError(err)
 
 	// Create bootstrapper, engine and handler
 	var (
-		calledGetFailed, calledGetAncestorsFailed,
-		calledQueryFailed, calledQueryFailed2,
-		calledGetAcceptedFailed, calledGetAcceptedFrontierFailed bool
+		calledGetStateSummaryFrontierFailed, calledGetAcceptedStateSummaryFailed,
+		calledGetAcceptedFrontierFailed, calledGetAcceptedFailed,
+		calledGetAncestorsFailed,
+		calledGetFailed, calledQueryFailed,
+		calledAppRequestFailed,
+		calledCrossChainAppRequestFailed bool
 
 		wg = sync.WaitGroup{}
 	)
 
 	ctx := snow.DefaultConsensusContextTest()
 	vdrs := validators.NewSet()
-	err = vdrs.AddWeight(ids.GenerateTestShortID(), 1)
-	assert.NoError(t, err)
+	err = vdrs.AddWeight(ids.GenerateTestNodeID(), 1)
+	r.NoError(err)
+
+	resourceTracker, err := tracker.NewResourceTracker(
+		prometheus.NewRegistry(),
+		resource.NoUsage,
+		meter.ContinuousFactory{},
+		time.Second,
+	)
+	r.NoError(err)
 
 	handler, err := handler.New(
-		mc,
 		ctx,
 		vdrs,
 		nil,
 		nil,
 		time.Second,
+		resourceTracker,
 	)
-	assert.NoError(t, err)
+	r.NoError(err)
 
 	bootstrapper := &common.BootstrapperTest{
 		BootstrapableTest: common.BootstrapableTest{
@@ -283,60 +330,240 @@ func TestRouterTimeout(t *testing.T) {
 	bootstrapper.Default(true)
 	bootstrapper.CantGossip = false
 	bootstrapper.ContextF = func() *snow.ConsensusContext { return ctx }
-	bootstrapper.ConnectedF = func(nodeID ids.ShortID, nodeVersion version.Application) error { return nil }
+	bootstrapper.ConnectedF = func(nodeID ids.NodeID, nodeVersion *version.Application) error { return nil }
 	bootstrapper.HaltF = func() {}
-	bootstrapper.GetFailedF = func(nodeID ids.ShortID, requestID uint32) error { wg.Done(); calledGetFailed = true; return nil }
-	bootstrapper.GetAncestorsFailedF = func(nodeID ids.ShortID, requestID uint32) error {
+
+	bootstrapper.GetStateSummaryFrontierFailedF = func(_ context.Context, nodeID ids.NodeID, requestID uint32) error {
+		defer wg.Done()
+		calledGetStateSummaryFrontierFailed = true
+		return nil
+	}
+	bootstrapper.GetAcceptedStateSummaryFailedF = func(_ context.Context, nodeID ids.NodeID, requestID uint32) error {
+		defer wg.Done()
+		calledGetAcceptedStateSummaryFailed = true
+		return nil
+	}
+	bootstrapper.GetAcceptedFrontierFailedF = func(_ context.Context, nodeID ids.NodeID, requestID uint32) error {
+		defer wg.Done()
+		calledGetAcceptedFrontierFailed = true
+		return nil
+	}
+	bootstrapper.GetAncestorsFailedF = func(_ context.Context, nodeID ids.NodeID, requestID uint32) error {
 		defer wg.Done()
 		calledGetAncestorsFailed = true
 		return nil
 	}
-	bootstrapper.QueryFailedF = func(nodeID ids.ShortID, requestID uint32) error {
-		defer wg.Done()
-		if !calledQueryFailed {
-			calledQueryFailed = true
-			return nil
-		}
-		calledQueryFailed2 = true
-		return nil
-	}
-	bootstrapper.GetAcceptedFailedF = func(nodeID ids.ShortID, requestID uint32) error {
+	bootstrapper.GetAcceptedFailedF = func(ctx context.Context, nodeID ids.NodeID, requestID uint32) error {
 		defer wg.Done()
 		calledGetAcceptedFailed = true
 		return nil
 	}
-	bootstrapper.GetAcceptedFrontierFailedF = func(nodeID ids.ShortID, requestID uint32) error {
+	bootstrapper.GetFailedF = func(_ context.Context, nodeID ids.NodeID, requestID uint32) error {
 		defer wg.Done()
-		calledGetAcceptedFrontierFailed = true
+		calledGetFailed = true
+		return nil
+	}
+	bootstrapper.QueryFailedF = func(_ context.Context, nodeID ids.NodeID, requestID uint32) error {
+		defer wg.Done()
+		calledQueryFailed = true
+		return nil
+	}
+	bootstrapper.AppRequestFailedF = func(_ context.Context, nodeID ids.NodeID, requestID uint32) error {
+		defer wg.Done()
+		calledAppRequestFailed = true
+		return nil
+	}
+	bootstrapper.CrossChainAppRequestFailedF = func(_ context.Context, chainID ids.ID, requestID uint32) error {
+		defer wg.Done()
+		calledCrossChainAppRequestFailed = true
 		return nil
 	}
 	handler.SetBootstrapper(bootstrapper)
 	ctx.SetState(snow.Bootstrapping) // assumed bootstrapping is ongoing
 
 	chainRouter.AddChain(handler)
+
+	bootstrapper.StartF = func(startReqID uint32) error { return nil }
 	handler.Start(false)
 
-	// Register requests for each request type
-	msgs := []message.Op{
-		message.Put,
-		message.Ancestors,
-		message.Chits,
-		message.Chits,
-		message.Accepted,
-		message.AcceptedFrontier,
+	nodeID := ids.GenerateTestNodeID()
+	requestID := uint32(0)
+	{
+		wg.Add(1)
+		chainRouter.RegisterRequest(
+			context.Background(),
+			nodeID,
+			ctx.ChainID,
+			ctx.ChainID,
+			requestID,
+			message.StateSummaryFrontierOp,
+			message.InternalGetStateSummaryFrontierFailed(
+				nodeID,
+				ctx.ChainID,
+				requestID,
+			),
+		)
 	}
 
-	wg.Add(len(msgs))
+	{
+		wg.Add(1)
+		requestID++
+		chainRouter.RegisterRequest(
+			context.Background(),
+			nodeID,
+			ctx.ChainID,
+			ctx.ChainID,
+			requestID,
+			message.AcceptedStateSummaryOp,
+			message.InternalGetAcceptedStateSummaryFailed(
+				nodeID,
+				ctx.ChainID,
+				requestID,
+			),
+		)
+	}
 
-	for i, msg := range msgs {
-		chainRouter.RegisterRequest(ids.GenerateTestShortID(), ctx.ChainID, uint32(i), msg)
+	{
+		wg.Add(1)
+		requestID++
+		chainRouter.RegisterRequest(
+			context.Background(),
+			nodeID,
+			ctx.ChainID,
+			ctx.ChainID,
+			requestID,
+			message.AcceptedFrontierOp,
+			message.InternalGetAcceptedFrontierFailed(
+				nodeID,
+				ctx.ChainID,
+				requestID,
+			),
+		)
+	}
+
+	{
+		wg.Add(1)
+		requestID++
+		chainRouter.RegisterRequest(
+			context.Background(),
+			nodeID,
+			ctx.ChainID,
+			ctx.ChainID,
+			requestID,
+			message.AcceptedOp,
+			message.InternalGetAcceptedFailed(
+				nodeID,
+				ctx.ChainID,
+				requestID,
+			),
+		)
+	}
+
+	{
+		wg.Add(1)
+		requestID++
+		chainRouter.RegisterRequest(
+			context.Background(),
+			nodeID,
+			ctx.ChainID,
+			ctx.ChainID,
+			requestID,
+			message.AncestorsOp,
+			message.InternalGetAncestorsFailed(
+				nodeID,
+				ctx.ChainID,
+				requestID,
+			),
+		)
+	}
+
+	{
+		wg.Add(1)
+		requestID++
+		chainRouter.RegisterRequest(
+			context.Background(),
+			nodeID,
+			ctx.ChainID,
+			ctx.ChainID,
+			requestID,
+			message.PutOp,
+			message.InternalGetFailed(
+				nodeID,
+				ctx.ChainID,
+				requestID,
+			),
+		)
+	}
+
+	{
+		wg.Add(1)
+		requestID++
+		chainRouter.RegisterRequest(
+			context.Background(),
+			nodeID,
+			ctx.ChainID,
+			ctx.ChainID,
+			requestID,
+			message.ChitsOp,
+			message.InternalQueryFailed(
+				nodeID,
+				ctx.ChainID,
+				requestID,
+			),
+		)
+	}
+
+	{
+		wg.Add(1)
+		requestID++
+		chainRouter.RegisterRequest(
+			context.Background(),
+			nodeID,
+			ctx.ChainID,
+			ctx.ChainID,
+			requestID,
+			message.AppResponseOp,
+			message.InternalAppRequestFailed(
+				nodeID,
+				ctx.ChainID,
+				requestID,
+			),
+		)
+	}
+
+	{
+		wg.Add(1)
+		requestID++
+		chainRouter.RegisterRequest(
+			context.Background(),
+			nodeID,
+			ctx.ChainID,
+			ctx.ChainID,
+			requestID,
+			message.CrossChainAppResponseOp,
+			message.InternalCrossChainAppRequestFailed(
+				nodeID,
+				ctx.ChainID,
+				ctx.ChainID,
+				requestID,
+			),
+		)
 	}
 
 	wg.Wait()
 
 	chainRouter.lock.Lock()
 	defer chainRouter.lock.Unlock()
-	assert.True(t, calledGetFailed && calledGetAncestorsFailed && calledQueryFailed2 && calledGetAcceptedFailed && calledGetAcceptedFrontierFailed)
+
+	r.True(calledGetStateSummaryFrontierFailed)
+	r.True(calledGetAcceptedStateSummaryFailed)
+	r.True(calledGetAcceptedFrontierFailed)
+	r.True(calledGetAcceptedFailed)
+	r.True(calledGetAncestorsFailed)
+	r.True(calledGetFailed)
+	r.True(calledQueryFailed)
+	r.True(calledAppRequestFailed)
+	r.True(calledCrossChainAppRequestFailed)
 }
 
 func TestRouterClearTimeouts(t *testing.T) {
@@ -353,36 +580,52 @@ func TestRouterClearTimeouts(t *testing.T) {
 		"",
 		prometheus.NewRegistry(),
 	)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	go tm.Dispatch()
 
 	// Create a router
 	chainRouter := ChainRouter{}
-	metrics := prometheus.NewRegistry()
-	mc, err := message.NewCreator(metrics, true, "dummyNamespace", 10*time.Second)
-	assert.NoError(t, err)
 
-	assert.NoError(t, err)
-	err = chainRouter.Initialize(ids.ShortEmpty, logging.NoLog{}, mc, tm, time.Millisecond, ids.Set{}, nil, HealthConfig{}, "", prometheus.NewRegistry())
-	assert.NoError(t, err)
+	metrics := prometheus.NewRegistry()
+	mc, err := message.NewCreator(metrics, "dummyNamespace", true, 10*time.Second)
+	require.NoError(t, err)
+
+	err = chainRouter.Initialize(
+		ids.EmptyNodeID,
+		logging.NoLog{},
+		tm,
+		time.Millisecond,
+		ids.Set{},
+		ids.Set{},
+		nil,
+		HealthConfig{},
+		"",
+		prometheus.NewRegistry(),
+	)
+	require.NoError(t, err)
 
 	// Create bootstrapper, engine and handler
 	ctx := snow.DefaultConsensusContextTest()
 	vdrs := validators.NewSet()
-	err = vdrs.AddWeight(ids.GenerateTestShortID(), 1)
-	assert.NoError(t, err)
+	err = vdrs.AddWeight(ids.GenerateTestNodeID(), 1)
+	require.NoError(t, err)
 
+	resourceTracker, err := tracker.NewResourceTracker(
+		prometheus.NewRegistry(),
+		resource.NoUsage,
+		meter.ContinuousFactory{},
+		time.Second,
+	)
+	require.NoError(t, err)
 	handler, err := handler.New(
-		mc,
 		ctx,
 		vdrs,
 		nil,
 		nil,
 		time.Second,
+		resourceTracker,
 	)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	bootstrapper := &common.BootstrapperTest{
 		BootstrapableTest: common.BootstrapableTest{
@@ -403,47 +646,182 @@ func TestRouterClearTimeouts(t *testing.T) {
 	ctx.SetState(snow.NormalOp) // assumed bootstrapping is done
 
 	chainRouter.AddChain(handler)
+
+	bootstrapper.StartF = func(startReqID uint32) error { return nil }
 	handler.Start(false)
 
-	// Register requests for each request type
-	ops := []message.Op{
-		message.Put,
-		message.Ancestors,
-		message.Chits,
-		message.Accepted,
-		message.AcceptedFrontier,
+	nodeID := ids.GenerateTestNodeID()
+	requestID := uint32(0)
+	{
+		chainRouter.RegisterRequest(
+			context.Background(),
+			nodeID,
+			ctx.ChainID,
+			ctx.ChainID,
+			requestID,
+			message.StateSummaryFrontierOp,
+			message.InternalGetStateSummaryFrontierFailed(
+				nodeID,
+				ctx.ChainID,
+				requestID,
+			),
+		)
+		msg := mc.InboundStateSummaryFrontier(
+			ctx.ChainID,
+			requestID,
+			nil,
+			nodeID,
+		)
+		chainRouter.HandleInbound(context.Background(), msg)
 	}
 
-	vID := ids.GenerateTestShortID()
-	for i, op := range ops {
-		chainRouter.RegisterRequest(vID, ctx.ChainID, uint32(i), op)
+	{
+		requestID++
+		chainRouter.RegisterRequest(
+			context.Background(),
+			nodeID,
+			ctx.ChainID,
+			ctx.ChainID,
+			requestID,
+			message.AcceptedStateSummaryOp,
+			message.InternalGetAcceptedStateSummaryFailed(
+				nodeID,
+				ctx.ChainID,
+				requestID,
+			),
+		)
+		msg := mc.InboundAcceptedStateSummary(
+			ctx.ChainID,
+			requestID,
+			nil,
+			nodeID,
+		)
+		chainRouter.HandleInbound(context.Background(), msg)
 	}
 
-	// Clear each timeout by simulating responses to the queries
-	// Note: Depends on the ordering of [msgs]
-	var inMsg message.InboundMessage
+	{
+		requestID++
+		chainRouter.RegisterRequest(
+			context.Background(),
+			nodeID,
+			ctx.ChainID,
+			ctx.ChainID,
+			requestID,
+			message.AcceptedFrontierOp,
+			message.InternalGetAcceptedFrontierFailed(
+				nodeID,
+				ctx.ChainID,
+				requestID,
+			),
+		)
+		msg := mc.InboundAcceptedFrontier(
+			ctx.ChainID,
+			requestID,
+			nil,
+			nodeID,
+		)
+		chainRouter.HandleInbound(context.Background(), msg)
+	}
 
-	// Put
-	inMsg = mc.InboundPut(ctx.ChainID, 0, ids.GenerateTestID(), nil, vID)
-	chainRouter.HandleInbound(inMsg)
+	{
+		requestID++
+		chainRouter.RegisterRequest(
+			context.Background(),
+			nodeID,
+			ctx.ChainID,
+			ctx.ChainID,
+			requestID,
+			message.AcceptedOp,
+			message.InternalGetAcceptedFailed(
+				nodeID,
+				ctx.ChainID,
+				requestID,
+			),
+		)
+		msg := mc.InboundAccepted(
+			ctx.ChainID,
+			requestID,
+			nil,
+			nodeID,
+		)
+		chainRouter.HandleInbound(context.Background(), msg)
+	}
 
-	// Ancestors
-	inMsg = mc.InboundAncestors(ctx.ChainID, 1, nil, vID)
-	chainRouter.HandleInbound(inMsg)
+	{
+		requestID++
+		chainRouter.RegisterRequest(
+			context.Background(),
+			nodeID,
+			ctx.ChainID,
+			ctx.ChainID,
+			requestID,
+			message.ChitsOp,
+			message.InternalQueryFailed(
+				nodeID,
+				ctx.ChainID,
+				requestID,
+			),
+		)
+		msg := mc.InboundChits(
+			ctx.ChainID,
+			requestID,
+			nil,
+			nodeID,
+		)
+		chainRouter.HandleInbound(context.Background(), msg)
+	}
 
-	// Chits
-	inMsg = mc.InboundChits(ctx.ChainID, 2, nil, vID)
-	chainRouter.HandleInbound(inMsg)
+	{
+		requestID++
+		chainRouter.RegisterRequest(
+			context.Background(),
+			nodeID,
+			ctx.ChainID,
+			ctx.ChainID,
+			requestID,
+			message.AppResponseOp,
+			message.InternalAppRequestFailed(
+				nodeID,
+				ctx.ChainID,
+				requestID,
+			),
+		)
+		msg := mc.InboundAppResponse(
+			ctx.ChainID,
+			requestID,
+			nil,
+			nodeID,
+		)
+		chainRouter.HandleInbound(context.Background(), msg)
+	}
 
-	// Accepted
-	inMsg = mc.InboundAccepted(ctx.ChainID, 3, nil, vID)
-	chainRouter.HandleInbound(inMsg)
+	{
+		requestID++
+		chainRouter.RegisterRequest(
+			context.Background(),
+			nodeID,
+			ctx.ChainID,
+			ctx.ChainID,
+			requestID,
+			message.CrossChainAppResponseOp,
+			message.InternalCrossChainAppRequestFailed(
+				nodeID,
+				ctx.ChainID,
+				ctx.ChainID,
+				requestID,
+			),
+		)
+		msg := message.InternalCrossChainAppResponse(
+			nodeID,
+			ctx.ChainID,
+			ctx.ChainID,
+			requestID,
+			nil,
+		)
+		chainRouter.HandleInbound(context.Background(), msg)
+	}
 
-	// Accepted Frontier
-	inMsg = mc.InboundAcceptedFrontier(ctx.ChainID, 4, nil, vID)
-	chainRouter.HandleInbound(inMsg)
-
-	assert.Equal(t, chainRouter.timedRequests.Len(), 0)
+	require.Equal(t, 0, chainRouter.timedRequests.Len())
 }
 
 func TestValidatorOnlyMessageDrops(t *testing.T) {
@@ -461,19 +839,29 @@ func TestValidatorOnlyMessageDrops(t *testing.T) {
 		"",
 		prometheus.NewRegistry(),
 	)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	go tm.Dispatch()
 
 	// Create a router
 	chainRouter := ChainRouter{}
-	metrics := prometheus.NewRegistry()
-	mc, err := message.NewCreator(metrics, true, "dummyNamespace", 10*time.Second)
-	assert.NoError(t, err)
 
-	err = chainRouter.Initialize(ids.ShortEmpty, logging.NoLog{}, mc, tm, time.Millisecond, ids.Set{}, nil, HealthConfig{}, "", prometheus.NewRegistry())
-	assert.NoError(t, err)
+	metrics := prometheus.NewRegistry()
+	mc, err := message.NewCreator(metrics, "dummyNamespace", true, 10*time.Second)
+	require.NoError(t, err)
+
+	err = chainRouter.Initialize(
+		ids.EmptyNodeID,
+		logging.NoLog{},
+		tm,
+		time.Millisecond,
+		ids.Set{},
+		ids.Set{},
+		nil,
+		HealthConfig{},
+		"",
+		prometheus.NewRegistry(),
+	)
+	require.NoError(t, err)
 
 	// Create bootstrapper, engine and handler
 	calledF := false
@@ -482,19 +870,25 @@ func TestValidatorOnlyMessageDrops(t *testing.T) {
 	ctx := snow.DefaultConsensusContextTest()
 	ctx.SetValidatorOnly()
 	vdrs := validators.NewSet()
-	vID := ids.GenerateTestShortID()
+	vID := ids.GenerateTestNodeID()
 	err = vdrs.AddWeight(vID, 1)
-	assert.NoError(t, err)
-
+	require.NoError(t, err)
+	resourceTracker, err := tracker.NewResourceTracker(
+		prometheus.NewRegistry(),
+		resource.NoUsage,
+		meter.ContinuousFactory{},
+		time.Second,
+	)
+	require.NoError(t, err)
 	handler, err := handler.New(
-		mc,
 		ctx,
 		vdrs,
 		nil,
 		nil,
 		time.Second,
+		resourceTracker,
 	)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	bootstrapper := &common.BootstrapperTest{
 		BootstrapableTest: common.BootstrapableTest{
@@ -506,7 +900,7 @@ func TestValidatorOnlyMessageDrops(t *testing.T) {
 	}
 	bootstrapper.Default(false)
 	bootstrapper.ContextF = func() *snow.ConsensusContext { return ctx }
-	bootstrapper.PullQueryF = func(nodeID ids.ShortID, requestID uint32, containerID ids.ID) error {
+	bootstrapper.PullQueryF = func(ctx context.Context, nodeID ids.NodeID, requestID uint32, containerID ids.ID) error {
 		defer wg.Done()
 		calledF = true
 		return nil
@@ -520,6 +914,8 @@ func TestValidatorOnlyMessageDrops(t *testing.T) {
 	handler.SetConsensus(engine)
 
 	chainRouter.AddChain(handler)
+
+	bootstrapper.StartF = func(startReqID uint32) error { return nil }
 	handler.Start(false)
 
 	var inMsg message.InboundMessage
@@ -527,15 +923,15 @@ func TestValidatorOnlyMessageDrops(t *testing.T) {
 	reqID := uint32(0)
 
 	// Non-validator case
-	nID := ids.GenerateTestShortID()
+	nID := ids.GenerateTestNodeID()
 
 	calledF = false
 	inMsg = mc.InboundPullQuery(ctx.ChainID, reqID, time.Hour, dummyContainerID,
 		nID,
 	)
-	chainRouter.HandleInbound(inMsg)
+	chainRouter.HandleInbound(context.Background(), inMsg)
 
-	assert.False(t, calledF) // should not be called
+	require.False(t, calledF) // should not be called
 
 	// Validator case
 	calledF = false
@@ -544,24 +940,163 @@ func TestValidatorOnlyMessageDrops(t *testing.T) {
 		vID,
 	)
 	wg.Add(1)
-	chainRouter.HandleInbound(inMsg)
+	chainRouter.HandleInbound(context.Background(), inMsg)
 
 	wg.Wait()
-	assert.True(t, calledF) // should be called since this is a validator request
+	require.True(t, calledF) // should be called since this is a validator request
 
 	// register a validator request
 	reqID++
-	chainRouter.RegisterRequest(vID, ctx.ChainID, reqID, message.Get)
-	assert.Equal(t, 1, chainRouter.timedRequests.Len())
+	chainRouter.RegisterRequest(
+		context.Background(),
+		vID,
+		ctx.ChainID,
+		ctx.ChainID,
+		reqID,
+		message.ChitsOp,
+		message.InternalQueryFailed(vID, ctx.ChainID, reqID),
+	)
+	require.Equal(t, 1, chainRouter.timedRequests.Len())
 
 	// remove it from validators
 	err = vdrs.Set(validators.NewSet().List())
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
-	inMsg = mc.InboundPut(ctx.ChainID, reqID, ids.GenerateTestID(), nil, nID)
-	chainRouter.HandleInbound(inMsg)
+	inMsg = mc.InboundChits(ctx.ChainID, reqID, nil, nID)
+	chainRouter.HandleInbound(context.Background(), inMsg)
 
 	// shouldn't clear out timed request, as the request should be cleared when
 	// the GetFailed message is sent
-	assert.Equal(t, 1, chainRouter.timedRequests.Len())
+	require.Equal(t, 1, chainRouter.timedRequests.Len())
+}
+
+func TestRouterCrossChainMessages(t *testing.T) {
+	tm, err := timeout.NewManager(
+		&timer.AdaptiveTimeoutConfig{
+			InitialTimeout:     3 * time.Second,
+			MinimumTimeout:     3 * time.Second,
+			MaximumTimeout:     5 * time.Minute,
+			TimeoutCoefficient: 1,
+			TimeoutHalflife:    5 * time.Minute,
+		},
+		benchlist.NewNoBenchlist(),
+		"timeoutManager",
+		prometheus.NewRegistry(),
+	)
+	require.NoError(t, err)
+	go tm.Dispatch()
+
+	// Create chain router
+	nodeID := ids.GenerateTestNodeID()
+	chainRouter := ChainRouter{}
+	err = chainRouter.Initialize(
+		nodeID,
+		logging.NoLog{},
+		tm,
+		time.Millisecond,
+		ids.Set{},
+		ids.Set{},
+		nil,
+		HealthConfig{},
+		"",
+		prometheus.NewRegistry(),
+	)
+	require.NoError(t, err)
+
+	// Set up validators
+	vdrs := validators.NewSet()
+	require.NoError(t, vdrs.AddWeight(ids.GenerateTestNodeID(), 1))
+
+	// Create bootstrapper, engine and handler
+	requester := snow.DefaultConsensusContextTest()
+	requester.ChainID = ids.GenerateTestID()
+	requester.Registerer = prometheus.NewRegistry()
+	requester.Metrics = metrics.NewOptionalGatherer()
+	requester.Executing(false)
+
+	resourceTracker, err := tracker.NewResourceTracker(
+		prometheus.NewRegistry(),
+		resource.NoUsage,
+		meter.ContinuousFactory{},
+		time.Second,
+	)
+	require.NoError(t, err)
+
+	requesterHandler, err := handler.New(
+		requester,
+		vdrs,
+		nil,
+		nil,
+		time.Second,
+		resourceTracker,
+	)
+	require.NoError(t, err)
+
+	responder := snow.DefaultConsensusContextTest()
+	responder.ChainID = ids.GenerateTestID()
+	responder.Registerer = prometheus.NewRegistry()
+	responder.Metrics = metrics.NewOptionalGatherer()
+	responder.Executing(false)
+
+	responderHandler, err := handler.New(
+		responder,
+		vdrs,
+		nil,
+		nil,
+		time.Second,
+		resourceTracker,
+	)
+	require.NoError(t, err)
+
+	// assumed bootstrapping is done
+	responder.SetState(snow.NormalOp)
+	requester.SetState(snow.NormalOp)
+
+	// router tracks two chains - one will send a message to the other
+	chainRouter.AddChain(requesterHandler)
+	chainRouter.AddChain(responderHandler)
+
+	// Each chain should start off with a connected message
+	require.Equal(t, 1, chainRouter.chains[requester.ChainID].Len())
+	require.Equal(t, 1, chainRouter.chains[responder.ChainID].Len())
+
+	// Requester sends a request to the responder
+	msgBytes := []byte("foobar")
+	msg := message.InternalCrossChainAppRequest(
+		requester.NodeID,
+		requester.ChainID,
+		responder.ChainID,
+		uint32(1),
+		time.Minute,
+		msgBytes,
+	)
+	chainRouter.HandleInbound(context.Background(), msg)
+	require.Equal(t, 2, chainRouter.chains[responder.ChainID].Len())
+
+	// We register the cross-chain response on the requester-side so we don't
+	// drop it.
+	chainRouter.RegisterRequest(
+		context.Background(),
+		nodeID,
+		requester.ChainID,
+		responder.ChainID,
+		uint32(1),
+		message.CrossChainAppResponseOp,
+		message.InternalCrossChainAppRequestFailed(
+			nodeID,
+			responder.ChainID,
+			requester.ChainID,
+			uint32(1),
+		),
+	)
+	// Responder sends a response back to the requester.
+	msg = message.InternalCrossChainAppResponse(
+		nodeID,
+		responder.ChainID,
+		requester.ChainID,
+		uint32(1),
+		msgBytes,
+	)
+	chainRouter.HandleInbound(context.Background(), msg)
+	require.Equal(t, 2, chainRouter.chains[requester.ChainID].Len())
 }

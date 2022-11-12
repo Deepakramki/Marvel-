@@ -1,4 +1,4 @@
-// Copyright (C) 2019-2021, Ava Labs, Inc. All rights reserved.
+// Copyright (C) 2019-2022, Ava Labs, Inc. All rights reserved.
 // See the file LICENSE for licensing terms.
 
 package nat
@@ -18,7 +18,7 @@ const (
 	soapRequestTimeout = 10 * time.Second
 )
 
-var _ Router = &upnpRouter{}
+var _ Router = (*upnpRouter)(nil)
 
 // upnpClient is the interface used by goupnp for their client implementations
 type upnpClient interface {
@@ -117,8 +117,13 @@ func (r *upnpRouter) ExternalIP() (net.IP, error) {
 	return ip, nil
 }
 
-func (r *upnpRouter) MapPort(protocol string, intPort, extPort uint16,
-	desc string, duration time.Duration) error {
+func (r *upnpRouter) MapPort(
+	protocol string,
+	intPort,
+	extPort uint16,
+	desc string,
+	duration time.Duration,
+) error {
 	ip, err := r.localIP()
 	if err != nil {
 		return nil

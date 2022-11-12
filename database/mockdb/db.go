@@ -1,4 +1,4 @@
-// Copyright (C) 2019-2021, Ava Labs, Inc. All rights reserved.
+// Copyright (C) 2019-2022, Ava Labs, Inc. All rights reserved.
 // See the file LICENSE for licensing terms.
 
 package mockdb
@@ -12,7 +12,7 @@ import (
 var (
 	errNoFunction = errors.New("user didn't specify what value(s) return")
 
-	_ database.Database = &Database{}
+	_ database.Database = (*Database)(nil)
 )
 
 // Database is a mock database meant to be used in tests.
@@ -33,9 +33,9 @@ type Database struct {
 	OnNewIteratorWithStart          func([]byte) database.Iterator
 	OnNewIteratorWithPrefix         func([]byte) database.Iterator
 	OnNewIteratorWithStartAndPrefix func([]byte, []byte) database.Iterator
-	OnStat                          func(string) (string, error)
 	OnCompact                       func([]byte, []byte) error
 	OnClose                         func() error
+	OnHealthCheck                   func() (interface{}, error)
 }
 
 // New returns a new mock database
@@ -104,13 +104,6 @@ func (db *Database) NewIteratorWithStartAndPrefix(start, prefix []byte) database
 	return db.OnNewIteratorWithStartAndPrefix(start, prefix)
 }
 
-func (db *Database) Stat(stat string) (string, error) {
-	if db.OnStat == nil {
-		return "", errNoFunction
-	}
-	return db.OnStat(stat)
-}
-
 func (db *Database) Compact(start []byte, limit []byte) error {
 	if db.OnCompact == nil {
 		return errNoFunction
@@ -123,4 +116,11 @@ func (db *Database) Close() error {
 		return errNoFunction
 	}
 	return db.OnClose()
+}
+
+func (db *Database) HealthCheck() (interface{}, error) {
+	if db.OnHealthCheck == nil {
+		return nil, errNoFunction
+	}
+	return db.OnHealthCheck()
 }

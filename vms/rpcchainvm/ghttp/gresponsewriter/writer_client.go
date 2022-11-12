@@ -1,4 +1,4 @@
-// Copyright (C) 2019-2021, Ava Labs, Inc. All rights reserved.
+// Copyright (C) 2019-2022, Ava Labs, Inc. All rights reserved.
 // See the file LICENSE for licensing terms.
 
 package gresponsewriter
@@ -23,9 +23,9 @@ import (
 )
 
 var (
-	_ http.ResponseWriter = &Client{}
-	_ http.Flusher        = &Client{}
-	_ http.Hijacker       = &Client{}
+	_ http.ResponseWriter = (*Client)(nil)
+	_ http.Flusher        = (*Client)(nil)
+	_ http.Hijacker       = (*Client)(nil)
 )
 
 // Client is an http.ResponseWriter that talks over RPC.

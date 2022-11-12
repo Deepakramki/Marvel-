@@ -1,4 +1,4 @@
-// Copyright (C) 2019-2021, Ava Labs, Inc. All rights reserved.
+// Copyright (C) 2019-2022, Ava Labs, Inc. All rights reserved.
 // See the file LICENSE for licensing terms.
 
 package gsharedmemory
@@ -14,11 +14,11 @@ import (
 	sharedmemorypb "github.com/ava-labs/avalanchego/proto/pb/sharedmemory"
 )
 
-var _ sharedmemorypb.SharedMemoryServer = &Server{}
+var _ sharedmemorypb.SharedMemoryServer = (*Server)(nil)
 
 // Server is shared memory that is managed over RPC.
 type Server struct {
-	sharedmemorypb.UnimplementedSharedMemoryServer
+	sharedmemorypb.UnsafeSharedMemoryServer
 	sm atomic.SharedMemory
 	db database.Database
 

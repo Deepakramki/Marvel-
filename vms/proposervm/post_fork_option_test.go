@@ -1,4 +1,4 @@
-// Copyright (C) 2019-2021, Ava Labs, Inc. All rights reserved.
+// Copyright (C) 2019-2022, Ava Labs, Inc. All rights reserved.
 // See the file LICENSE for licensing terms.
 
 package proposervm
@@ -726,11 +726,18 @@ func TestOptionTimestampValidity(t *testing.T) {
 	// Restart the node.
 
 	ctx := proVM.ctx
-	proVM = New(coreVM, time.Time{}, 0, false)
+	proVM = New(coreVM, time.Time{}, 0)
 
-	coreVM.InitializeF = func(*snow.Context, manager.Manager,
-		[]byte, []byte, []byte, chan<- common.Message,
-		[]*common.Fx, common.AppSender) error {
+	coreVM.InitializeF = func(
+		*snow.Context,
+		manager.Manager,
+		[]byte,
+		[]byte,
+		[]byte,
+		chan<- common.Message,
+		[]*common.Fx,
+		common.AppSender,
+	) error {
 		return nil
 	}
 	coreVM.LastAcceptedF = func() (ids.ID, error) { return coreOracleBlk.opts[0].ID(), nil }

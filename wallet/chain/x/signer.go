@@ -1,4 +1,4 @@
-// Copyright (C) 2019-2021, Ava Labs, Inc. All rights reserved.
+// Copyright (C) 2019-2022, Ava Labs, Inc. All rights reserved.
 // See the file LICENSE for licensing terms.
 
 package x
@@ -12,8 +12,10 @@ import (
 	"github.com/ava-labs/avalanchego/database"
 	"github.com/ava-labs/avalanchego/ids"
 	"github.com/ava-labs/avalanchego/utils/crypto"
+	"github.com/ava-labs/avalanchego/utils/crypto/keychain"
 	"github.com/ava-labs/avalanchego/utils/hashing"
-	"github.com/ava-labs/avalanchego/vms/avm"
+	"github.com/ava-labs/avalanchego/vms/avm/fxs"
+	"github.com/ava-labs/avalanchego/vms/avm/txs"
 	"github.com/ava-labs/avalanchego/vms/components/avax"
 	"github.com/ava-labs/avalanchego/vms/components/verify"
 	"github.com/ava-labs/avalanchego/vms/nftfx"
@@ -32,12 +34,12 @@ var (
 
 	emptySig [crypto.SECP256K1RSigLen]byte
 
-	_ Signer = &signer{}
+	_ Signer = (*signer)(nil)
 )
 
 type Signer interface {
-	SignUnsigned(ctx stdcontext.Context, tx avm.UnsignedTx) (*avm.Tx, error)
-	Sign(ctx stdcontext.Context, tx *avm.Tx) error
+	SignUnsigned(ctx stdcontext.Context, tx txs.UnsignedTx) (*txs.Tx, error)
+	Sign(ctx stdcontext.Context, tx *txs.Tx) error
 }
 
 type SignerBackend interface {
@@ -45,42 +47,41 @@ type SignerBackend interface {
 }
 
 type signer struct {
-	kc      *secp256k1fx.Keychain
+	kc      keychain.Keychain
 	backend SignerBackend
 }
 
-func NewSigner(kc *secp256k1fx.Keychain, backend SignerBackend) Signer {
+func NewSigner(kc keychain.Keychain, backend SignerBackend) Signer {
 	return &signer{
 		kc:      kc,
 		backend: backend,
 	}
 }
 
-func (s *signer) SignUnsigned(ctx stdcontext.Context, utx avm.UnsignedTx) (*avm.Tx, error) {
-	tx := &avm.Tx{
-		UnsignedTx: utx,
-	}
+func (s *signer) SignUnsigned(ctx stdcontext.Context, utx txs.UnsignedTx) (*txs.Tx, error) {
+	tx := &txs.Tx{Unsigned: utx}
 	return tx, s.Sign(ctx, tx)
 }
 
-func (s *signer) Sign(ctx stdcontext.Context, tx *avm.Tx) error {
-	switch utx := tx.UnsignedTx.(type) {
-	case *avm.BaseTx:
+// TODO: implement txs.Visitor here
+func (s *signer) Sign(ctx stdcontext.Context, tx *txs.Tx) error {
+	switch utx := tx.Unsigned.(type) {
+	case *txs.BaseTx:
 		return s.signBaseTx(ctx, tx, utx)
-	case *avm.CreateAssetTx:
+	case *txs.CreateAssetTx:
 		return s.signCreateAssetTx(ctx, tx, utx)
-	case *avm.OperationTx:
+	case *txs.OperationTx:
 		return s.signOperationTx(ctx, tx, utx)
-	case *avm.ImportTx:
+	case *txs.ImportTx:
 		return s.signImportTx(ctx, tx, utx)
-	case *avm.ExportTx:
+	case *txs.ExportTx:
 		return s.signExportTx(ctx, tx, utx)
 	default:
-		return fmt.Errorf("%w: %T", errUnknownTxType, tx.UnsignedTx)
+		return fmt.Errorf("%w: %T", errUnknownTxType, tx.Unsigned)
 	}
 }
 
-func (s *signer) signBaseTx(ctx stdcontext.Context, tx *avm.Tx, utx *avm.BaseTx) error {
+func (s *signer) signBaseTx(ctx stdcontext.Context, tx *txs.Tx, utx *txs.BaseTx) error {
 	txCreds, txSigners, err := s.getSigners(ctx, utx.BlockchainID, utx.Ins)
 	if err != nil {
 		return err
@@ -88,7 +89,7 @@ func (s *signer) signBaseTx(ctx stdcontext.Context, tx *avm.Tx, utx *avm.BaseTx)
 	return s.sign(tx, txCreds, txSigners)
 }
 
-func (s *signer) signCreateAssetTx(ctx stdcontext.Context, tx *avm.Tx, utx *avm.CreateAssetTx) error {
+func (s *signer) signCreateAssetTx(ctx stdcontext.Context, tx *txs.Tx, utx *txs.CreateAssetTx) error {
 	txCreds, txSigners, err := s.getSigners(ctx, utx.BlockchainID, utx.Ins)
 	if err != nil {
 		return err
@@ -96,7 +97,7 @@ func (s *signer) signCreateAssetTx(ctx stdcontext.Context, tx *avm.Tx, utx *avm.
 	return s.sign(tx, txCreds, txSigners)
 }
 
-func (s *signer) signOperationTx(ctx stdcontext.Context, tx *avm.Tx, utx *avm.OperationTx) error {
+func (s *signer) signOperationTx(ctx stdcontext.Context, tx *txs.Tx, utx *txs.OperationTx) error {
 	txCreds, txSigners, err := s.getSigners(ctx, utx.BlockchainID, utx.Ins)
 	if err != nil {
 		return err
@@ -110,7 +111,7 @@ func (s *signer) signOperationTx(ctx stdcontext.Context, tx *avm.Tx, utx *avm.Op
 	return s.sign(tx, txCreds, txSigners)
 }
 
-func (s *signer) signImportTx(ctx stdcontext.Context, tx *avm.Tx, utx *avm.ImportTx) error {
+func (s *signer) signImportTx(ctx stdcontext.Context, tx *txs.Tx, utx *txs.ImportTx) error {
 	txCreds, txSigners, err := s.getSigners(ctx, utx.BlockchainID, utx.Ins)
 	if err != nil {
 		return err
@@ -124,7 +125,7 @@ func (s *signer) signImportTx(ctx stdcontext.Context, tx *avm.Tx, utx *avm.Impor
 	return s.sign(tx, txCreds, txSigners)
 }
 
-func (s *signer) signExportTx(ctx stdcontext.Context, tx *avm.Tx, utx *avm.ExportTx) error {
+func (s *signer) signExportTx(ctx stdcontext.Context, tx *txs.Tx, utx *txs.ExportTx) error {
 	txCreds, txSigners, err := s.getSigners(ctx, utx.BlockchainID, utx.Ins)
 	if err != nil {
 		return err
@@ -132,9 +133,9 @@ func (s *signer) signExportTx(ctx stdcontext.Context, tx *avm.Tx, utx *avm.Expor
 	return s.sign(tx, txCreds, txSigners)
 }
 
-func (s *signer) getSigners(ctx stdcontext.Context, sourceChainID ids.ID, ins []*avax.TransferableInput) ([]verify.Verifiable, [][]*crypto.PrivateKeySECP256K1R, error) {
+func (s *signer) getSigners(ctx stdcontext.Context, sourceChainID ids.ID, ins []*avax.TransferableInput) ([]verify.Verifiable, [][]keychain.Signer, error) {
 	txCreds := make([]verify.Verifiable, len(ins))
-	txSigners := make([][]*crypto.PrivateKeySECP256K1R, len(ins))
+	txSigners := make([][]keychain.Signer, len(ins))
 	for credIndex, transferInput := range ins {
 		txCreds[credIndex] = &secp256k1fx.Credential{}
 		input, ok := transferInput.In.(*secp256k1fx.TransferInput)
@@ -142,7 +143,7 @@ func (s *signer) getSigners(ctx stdcontext.Context, sourceChainID ids.ID, ins []
 			return nil, nil, errUnknownInputType
 		}
 
-		inputSigners := make([]*crypto.PrivateKeySECP256K1R, len(input.SigIndices))
+		inputSigners := make([]keychain.Signer, len(input.SigIndices))
 		txSigners[credIndex] = inputSigners
 
 		utxoID := transferInput.InputID()
@@ -179,9 +180,9 @@ func (s *signer) getSigners(ctx stdcontext.Context, sourceChainID ids.ID, ins []
 	return txCreds, txSigners, nil
 }
 
-func (s *signer) getOpsSigners(ctx stdcontext.Context, sourceChainID ids.ID, ops []*avm.Operation) ([]verify.Verifiable, [][]*crypto.PrivateKeySECP256K1R, error) {
+func (s *signer) getOpsSigners(ctx stdcontext.Context, sourceChainID ids.ID, ops []*txs.Operation) ([]verify.Verifiable, [][]keychain.Signer, error) {
 	txCreds := make([]verify.Verifiable, len(ops))
-	txSigners := make([][]*crypto.PrivateKeySECP256K1R, len(ops))
+	txSigners := make([][]keychain.Signer, len(ops))
 	for credIndex, op := range ops {
 		var input *secp256k1fx.Input
 		switch op := op.Op.(type) {
@@ -204,7 +205,7 @@ func (s *signer) getOpsSigners(ctx stdcontext.Context, sourceChainID ids.ID, ops
 			return nil, nil, errUnknownOpType
 		}
 
-		inputSigners := make([]*crypto.PrivateKeySECP256K1R, len(input.SigIndices))
+		inputSigners := make([]keychain.Signer, len(input.SigIndices))
 		txSigners[credIndex] = inputSigners
 
 		if len(op.UTXOIDs) != 1 {
@@ -255,22 +256,23 @@ func (s *signer) getOpsSigners(ctx stdcontext.Context, sourceChainID ids.ID, ops
 	return txCreds, txSigners, nil
 }
 
-func (s *signer) sign(tx *avm.Tx, creds []verify.Verifiable, txSigners [][]*crypto.PrivateKeySECP256K1R) error {
-	unsignedBytes, err := Codec.Marshal(CodecVersion, &tx.UnsignedTx)
+func (s *signer) sign(tx *txs.Tx, creds []verify.Verifiable, txSigners [][]keychain.Signer) error {
+	codec := Parser.Codec()
+	unsignedBytes, err := codec.Marshal(txs.CodecVersion, &tx.Unsigned)
 	if err != nil {
 		return fmt.Errorf("couldn't marshal unsigned tx: %w", err)
 	}
 	unsignedHash := hashing.ComputeHash256(unsignedBytes)
 
 	if expectedLen := len(txSigners); expectedLen != len(tx.Creds) {
-		tx.Creds = make([]*avm.FxCredential, expectedLen)
+		tx.Creds = make([]*fxs.FxCredential, expectedLen)
 	}
 
 	sigCache := make(map[ids.ShortID][crypto.SECP256K1RSigLen]byte)
 	for credIndex, inputSigners := range txSigners {
 		fxCred := tx.Creds[credIndex]
 		if fxCred == nil {
-			fxCred = &avm.FxCredential{}
+			fxCred = &fxs.FxCredential{}
 			tx.Creds[credIndex] = fxCred
 		}
 		credIntf := fxCred.Verifiable
@@ -301,7 +303,7 @@ func (s *signer) sign(tx *avm.Tx, creds []verify.Verifiable, txSigners [][]*cryp
 				// transaction. However, we can attempt to partially sign it.
 				continue
 			}
-			addr := signer.PublicKey().Address()
+			addr := signer.Address()
 			if sig := cred.Sigs[sigIndex]; sig != emptySig {
 				// If this signature has already been populated, we can just
 				// copy the needed signature for the future.
@@ -325,7 +327,7 @@ func (s *signer) sign(tx *avm.Tx, creds []verify.Verifiable, txSigners [][]*cryp
 		}
 	}
 
-	signedBytes, err := Codec.Marshal(CodecVersion, tx)
+	signedBytes, err := codec.Marshal(txs.CodecVersion, tx)
 	if err != nil {
 		return fmt.Errorf("couldn't marshal tx: %w", err)
 	}

@@ -1,4 +1,4 @@
-// Copyright (C) 2019-2021, Ava Labs, Inc. All rights reserved.
+// Copyright (C) 2019-2022, Ava Labs, Inc. All rights reserved.
 // See the file LICENSE for licensing terms.
 
 package gresponsewriter
@@ -26,12 +26,12 @@ var (
 	errUnsupportedFlushing  = errors.New("response writer doesn't support flushing")
 	errUnsupportedHijacking = errors.New("response writer doesn't support hijacking")
 
-	_ responsewriterpb.WriterServer = &Server{}
+	_ responsewriterpb.WriterServer = (*Server)(nil)
 )
 
 // Server is an http.ResponseWriter that is managed over RPC.
 type Server struct {
-	responsewriterpb.UnimplementedWriterServer
+	responsewriterpb.UnsafeWriterServer
 	writer http.ResponseWriter
 }
 
@@ -68,7 +68,7 @@ func (s *Server) WriteHeader(ctx context.Context, req *responsewriterpb.WriteHea
 	for _, header := range req.Headers {
 		headers[header.Key] = header.Values
 	}
-	s.writer.WriteHeader(int(req.StatusCode))
+	s.writer.WriteHeader(grpcutils.EnsureValidResponseCode(int(req.StatusCode)))
 	return &emptypb.Empty{}, nil
 }
 

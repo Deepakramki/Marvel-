@@ -1,4 +1,4 @@
-// Copyright (C) 2019-2021, Ava Labs, Inc. All rights reserved.
+// Copyright (C) 2019-2022, Ava Labs, Inc. All rights reserved.
 // See the file LICENSE for licensing terms.
 
 package linearcodec
@@ -19,10 +19,10 @@ const (
 )
 
 var (
-	_ Codec              = &linearCodec{}
-	_ codec.Codec        = &linearCodec{}
-	_ codec.Registry     = &linearCodec{}
-	_ codec.GeneralCodec = &linearCodec{}
+	_ Codec              = (*linearCodec)(nil)
+	_ codec.Codec        = (*linearCodec)(nil)
+	_ codec.Registry     = (*linearCodec)(nil)
+	_ codec.GeneralCodec = (*linearCodec)(nil)
 )
 
 // Codec marshals and unmarshals

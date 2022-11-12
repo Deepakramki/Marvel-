@@ -1,11 +1,11 @@
-// Copyright (C) 2019-2021, Ava Labs, Inc. All rights reserved.
+// Copyright (C) 2019-2022, Ava Labs, Inc. All rights reserved.
 // See the file LICENSE for licensing terms.
 
 package registry
 
 import "github.com/ava-labs/avalanchego/ids"
 
-var _ VMRegistry = &vmRegistry{}
+var _ VMRegistry = (*vmRegistry)(nil)
 
 // VMRegistry defines functionality to get any new virtual machines on the node,
 // and install them if they're not already installed.

@@ -1,4 +1,4 @@
-// Copyright (C) 2019-2021, Ava Labs, Inc. All rights reserved.
+// Copyright (C) 2019-2022, Ava Labs, Inc. All rights reserved.
 // See the file LICENSE for licensing terms.
 
 package common
@@ -7,7 +7,7 @@ import (
 	"sync/atomic"
 )
 
-var _ Haltable = &Halter{}
+var _ Haltable = (*Halter)(nil)
 
 type Haltable interface {
 	Halt()

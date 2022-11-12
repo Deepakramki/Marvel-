@@ -1,4 +1,4 @@
-// Copyright (C) 2019-2021, Ava Labs, Inc. All rights reserved.
+// Copyright (C) 2019-2022, Ava Labs, Inc. All rights reserved.
 // See the file LICENSE for licensing terms.
 
 package snowball
@@ -7,7 +7,7 @@ import (
 	"fmt"
 )
 
-var _ UnarySnowflake = &unarySnowflake{}
+var _ UnarySnowflake = (*unarySnowflake)(nil)
 
 // unarySnowflake is the implementation of a unary snowflake instance
 type unarySnowflake struct {

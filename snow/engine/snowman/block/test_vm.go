@@ -1,4 +1,4 @@
-// Copyright (C) 2019-2021, Ava Labs, Inc. All rights reserved.
+// Copyright (C) 2019-2022, Ava Labs, Inc. All rights reserved.
 // See the file LICENSE for licensing terms.
 
 package block
@@ -17,7 +17,7 @@ var (
 	errGetBlock     = errors.New("unexpectedly called GetBlock")
 	errLastAccepted = errors.New("unexpectedly called LastAccepted")
 
-	_ ChainVM = &TestVM{}
+	_ ChainVM = (*TestVM)(nil)
 )
 
 // TestVM is a ChainVM that is useful for testing.

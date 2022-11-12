@@ -1,4 +1,4 @@
-// Copyright (C) 2019-2021, Ava Labs, Inc. All rights reserved.
+// Copyright (C) 2019-2022, Ava Labs, Inc. All rights reserved.
 // See the file LICENSE for licensing terms.
 
 package network
@@ -8,13 +8,13 @@ import (
 	"sync"
 
 	"github.com/ava-labs/avalanchego/network/peer"
-	"github.com/ava-labs/avalanchego/utils"
+	"github.com/ava-labs/avalanchego/utils/ips"
 	"github.com/ava-labs/avalanchego/utils/timer/mockable"
 )
 
 // ipSigner will return a signedIP for the current value of our dynamic IP.
 type ipSigner struct {
-	ip     *utils.DynamicIPDesc
+	ip     ips.DynamicIPPort
 	clock  *mockable.Clock
 	signer crypto.Signer
 
@@ -26,7 +26,7 @@ type ipSigner struct {
 }
 
 func newIPSigner(
-	ip *utils.DynamicIPDesc,
+	ip ips.DynamicIPPort,
 	clock *mockable.Clock,
 	signer crypto.Signer,
 ) *ipSigner {
@@ -48,7 +48,7 @@ func (s *ipSigner) getSignedIP() (*peer.SignedIP, error) {
 	s.signedIPLock.RLock()
 	signedIP := s.signedIP
 	s.signedIPLock.RUnlock()
-	ip := s.ip.IP()
+	ip := s.ip.IPPort()
 	if signedIP != nil && signedIP.IP.IP.Equal(ip) {
 		return signedIP, nil
 	}

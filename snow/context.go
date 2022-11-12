@@ -1,4 +1,4 @@
-// Copyright (C) 2019-2021, Ava Labs, Inc. All rights reserved.
+// Copyright (C) 2019-2022, Ava Labs, Inc. All rights reserved.
 // See the file LICENSE for licensing terms.
 
 package snow
@@ -16,17 +16,9 @@ import (
 	"github.com/ava-labs/avalanchego/ids"
 	"github.com/ava-labs/avalanchego/snow/validators"
 	"github.com/ava-labs/avalanchego/utils"
+	"github.com/ava-labs/avalanchego/utils/crypto/bls"
 	"github.com/ava-labs/avalanchego/utils/logging"
 )
-
-type EventDispatcher interface {
-	Issuer
-	// If the returned error is non-nil, the chain associated with [ctx] should shut
-	// down and not commit [container] or any other container to its database as accepted.
-	// Accept must be called before [containerID] is committed to the VM as accepted.
-	Acceptor
-	Rejector
-}
 
 type SubnetLookup interface {
 	SubnetID(chainID ids.ID) (ids.ID, error)
@@ -47,7 +39,7 @@ type Context struct {
 	NetworkID uint32
 	SubnetID  ids.ID
 	ChainID   ids.ID
-	NodeID    ids.ShortID
+	NodeID    ids.NodeID
 
 	XChainID    ids.ID
 	AVAXAssetID ids.ID
@@ -64,15 +56,29 @@ type Context struct {
 	ValidatorState    validators.State  // interface for P-Chain validators
 	StakingLeafSigner crypto.Signer     // block signer
 	StakingCertLeaf   *x509.Certificate // block certificate
+	StakingBLSKey     *bls.SecretKey    // bls signer
+}
+
+// Expose gatherer interface for unit testing.
+type Registerer interface {
+	prometheus.Registerer
+	prometheus.Gatherer
 }
 
 type ConsensusContext struct {
 	*Context
 
-	Registerer prometheus.Registerer
+	Registerer Registerer
 
-	DecisionDispatcher  EventDispatcher
-	ConsensusDispatcher EventDispatcher
+	// DecisionAcceptor is the callback that will be fired whenever a VM is
+	// notified that their object, either a block in snowman or a transaction
+	// in avalanche, was accepted.
+	DecisionAcceptor Acceptor
+
+	// ConsensusAcceptor is the callback that will be fired whenever a
+	// container, either a block in snowman or a vertex in avalanche, was
+	// accepted.
+	ConsensusAcceptor Acceptor
 
 	// Non-zero iff this chain bootstrapped.
 	state utils.AtomicInterface
@@ -119,7 +125,7 @@ func DefaultContextTest() *Context {
 		NetworkID: 0,
 		SubnetID:  ids.Empty,
 		ChainID:   ids.Empty,
-		NodeID:    ids.ShortEmpty,
+		NodeID:    ids.EmptyNodeID,
 		Log:       logging.NoLog{},
 		BCLookup:  ids.NewAliaser(),
 		Metrics:   metrics.NewOptionalGatherer(),
@@ -128,79 +134,9 @@ func DefaultContextTest() *Context {
 
 func DefaultConsensusContextTest() *ConsensusContext {
 	return &ConsensusContext{
-		Context:             DefaultContextTest(),
-		Registerer:          prometheus.NewRegistry(),
-		DecisionDispatcher:  noOpEventDispatcher{},
-		ConsensusDispatcher: noOpEventDispatcher{},
+		Context:           DefaultContextTest(),
+		Registerer:        prometheus.NewRegistry(),
+		DecisionAcceptor:  noOpAcceptor{},
+		ConsensusAcceptor: noOpAcceptor{},
 	}
-}
-
-type noOpEventDispatcher struct{}
-
-func (noOpEventDispatcher) Issue(*ConsensusContext, ids.ID, []byte) error  { return nil }
-func (noOpEventDispatcher) Accept(*ConsensusContext, ids.ID, []byte) error { return nil }
-func (noOpEventDispatcher) Reject(*ConsensusContext, ids.ID, []byte) error { return nil }
-
-var _ EventDispatcher = &EventDispatcherTracker{}
-
-func NewEventDispatcherTracker() *EventDispatcherTracker {
-	return &EventDispatcherTracker{
-		issued:   make(map[ids.ID]int),
-		accepted: make(map[ids.ID]int),
-		rejected: make(map[ids.ID]int),
-	}
-}
-
-// EventDispatcherTracker tracks the dispatched events by its ID and counts.
-// Useful for testing.
-type EventDispatcherTracker struct {
-	mu sync.RWMutex
-	// maps "issued" ID to its count
-	issued map[ids.ID]int
-	// maps "accepted" ID to its count
-	accepted map[ids.ID]int
-	// maps "rejected" ID to its count
-	rejected map[ids.ID]int
-}
-
-func (evd *EventDispatcherTracker) IsIssued(containerID ids.ID) (int, bool) {
-	evd.mu.RLock()
-	cnt, ok := evd.issued[containerID]
-	evd.mu.RUnlock()
-	return cnt, ok
-}
-
-func (evd *EventDispatcherTracker) Issue(ctx *ConsensusContext, containerID ids.ID, container []byte) error {
-	evd.mu.Lock()
-	evd.issued[containerID]++
-	evd.mu.Unlock()
-	return nil
-}
-
-func (evd *EventDispatcherTracker) Accept(ctx *ConsensusContext, containerID ids.ID, container []byte) error {
-	evd.mu.Lock()
-	evd.accepted[containerID]++
-	evd.mu.Unlock()
-	return nil
-}
-
-func (evd *EventDispatcherTracker) IsAccepted(containerID ids.ID) (int, bool) {
-	evd.mu.RLock()
-	cnt, ok := evd.accepted[containerID]
-	evd.mu.RUnlock()
-	return cnt, ok
-}
-
-func (evd *EventDispatcherTracker) Reject(ctx *ConsensusContext, containerID ids.ID, container []byte) error {
-	evd.mu.Lock()
-	evd.rejected[containerID]++
-	evd.mu.Unlock()
-	return nil
-}
-
-func (evd *EventDispatcherTracker) IsRejected(containerID ids.ID) (int, bool) {
-	evd.mu.RLock()
-	cnt, ok := evd.rejected[containerID]
-	evd.mu.RUnlock()
-	return cnt, ok
 }

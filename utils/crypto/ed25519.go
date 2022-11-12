@@ -1,4 +1,4 @@
-// Copyright (C) 2019-2021, Ava Labs, Inc. All rights reserved.
+// Copyright (C) 2019-2022, Ava Labs, Inc. All rights reserved.
 // See the file LICENSE for licensing terms.
 
 package crypto
@@ -18,10 +18,9 @@ var (
 )
 
 var (
-	// Interface compliance
-	_ Factory    = &FactoryED25519{}
-	_ PublicKey  = &PublicKeyED25519{}
-	_ PrivateKey = &PrivateKeyED25519{}
+	_ Factory    = (*FactoryED25519)(nil)
+	_ PublicKey  = (*PublicKeyED25519)(nil)
+	_ PrivateKey = (*PrivateKeyED25519)(nil)
 )
 
 type FactoryED25519 struct{}

@@ -1,4 +1,4 @@
-// Copyright (C) 2019-2021, Ava Labs, Inc. All rights reserved.
+// Copyright (C) 2019-2022, Ava Labs, Inc. All rights reserved.
 // See the file LICENSE for licensing terms.
 
 package metervm
@@ -6,8 +6,8 @@ package metervm
 import "github.com/ava-labs/avalanchego/snow/consensus/snowman"
 
 var (
-	_ snowman.Block       = &meterBlock{}
-	_ snowman.OracleBlock = &meterBlock{}
+	_ snowman.Block       = (*meterBlock)(nil)
+	_ snowman.OracleBlock = (*meterBlock)(nil)
 )
 
 type meterBlock struct {

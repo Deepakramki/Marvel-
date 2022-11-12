@@ -1,4 +1,4 @@
-// Copyright (C) 2019-2021, Ava Labs, Inc. All rights reserved.
+// Copyright (C) 2019-2022, Ava Labs, Inc. All rights reserved.
 // See the file LICENSE for licensing terms.
 
 package ghttp
@@ -21,13 +21,13 @@ import (
 )
 
 var (
-	_ httppb.HTTPServer   = &Server{}
-	_ http.ResponseWriter = &ResponseWriter{}
+	_ httppb.HTTPServer   = (*Server)(nil)
+	_ http.ResponseWriter = (*ResponseWriter)(nil)
 )
 
 // Server is an http.Handler that is managed over RPC.
 type Server struct {
-	httppb.UnimplementedHTTPServer
+	httppb.UnsafeHTTPServer
 	handler http.Handler
 }
 

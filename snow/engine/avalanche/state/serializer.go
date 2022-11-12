@@ -1,4 +1,4 @@
-// Copyright (C) 2019-2021, Ava Labs, Inc. All rights reserved.
+// Copyright (C) 2019-2022, Ava Labs, Inc. All rights reserved.
 // See the file LICENSE for licensing terms.
 
 // Package state manages the meta-data required by consensus for an avalanche
@@ -31,7 +31,7 @@ var (
 	errWrongChainID  = errors.New("wrong ChainID in vertex")
 )
 
-var _ vertex.Manager = &Serializer{}
+var _ vertex.Manager = (*Serializer)(nil)
 
 // Serializer manages the state of multiple vertices
 type Serializer struct {
@@ -98,7 +98,7 @@ func (s *Serializer) buildVtx(
 		if err != nil {
 			return nil, err
 		}
-		height = math.Max64(height, childHeight)
+		height = math.Max(height, childHeight)
 	}
 
 	var (
@@ -162,4 +162,18 @@ func (s *Serializer) getUniqueVertex(vtxID ids.ID) (*uniqueVertex, error) {
 		return nil, errUnknownVertex
 	}
 	return vtx, nil
+}
+
+func (s *Serializer) StopVertexAccepted() (bool, error) {
+	edge := s.Edge()
+	if len(edge) != 1 {
+		return false, nil
+	}
+
+	vtx, err := s.getUniqueVertex(edge[0])
+	if err != nil {
+		return false, err
+	}
+
+	return vtx.v.vtx.StopVertex(), nil
 }

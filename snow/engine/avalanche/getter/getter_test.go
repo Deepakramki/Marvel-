@@ -1,9 +1,10 @@
-// Copyright (C) 2019-2021, Ava Labs, Inc. All rights reserved.
+// Copyright (C) 2019-2022, Ava Labs, Inc. All rights reserved.
 // See the file LICENSE for licensing terms.
 
 package getter
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -20,7 +21,7 @@ var errUnknownVertex = errors.New("unknown vertex")
 
 func testSetup(t *testing.T) (*vertex.TestManager, *common.SenderTest, common.Config) {
 	peers := validators.NewSet()
-	peer := ids.GenerateTestShortID()
+	peer := ids.GenerateTestNodeID()
 	if err := peers.AddWeight(peer, 1); err != nil {
 		t.Fatal(err)
 	}
@@ -80,11 +81,11 @@ func TestAcceptedFrontier(t *testing.T) {
 	}
 
 	var accepted []ids.ID
-	sender.SendAcceptedFrontierF = func(_ ids.ShortID, _ uint32, frontier []ids.ID) {
+	sender.SendAcceptedFrontierF = func(_ context.Context, _ ids.NodeID, _ uint32, frontier []ids.ID) {
 		accepted = frontier
 	}
 
-	if err := bs.GetAcceptedFrontier(ids.ShortEmpty, 0); err != nil {
+	if err := bs.GetAcceptedFrontier(context.Background(), ids.EmptyNodeID, 0); err != nil {
 		t.Fatal(err)
 	}
 
@@ -145,11 +146,11 @@ func TestFilterAccepted(t *testing.T) {
 	}
 
 	var accepted []ids.ID
-	sender.SendAcceptedF = func(_ ids.ShortID, _ uint32, frontier []ids.ID) {
+	sender.SendAcceptedF = func(_ context.Context, _ ids.NodeID, _ uint32, frontier []ids.ID) {
 		accepted = frontier
 	}
 
-	if err := bs.GetAccepted(ids.ShortEmpty, 0, vtxIDs); err != nil {
+	if err := bs.GetAccepted(context.Background(), ids.EmptyNodeID, 0, vtxIDs); err != nil {
 		t.Fatal(err)
 	}
 

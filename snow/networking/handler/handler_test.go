@@ -1,46 +1,58 @@
-// Copyright (C) 2019-2021, Ava Labs, Inc. All rights reserved.
+// Copyright (C) 2019-2022, Ava Labs, Inc. All rights reserved.
 // See the file LICENSE for licensing terms.
 
 package handler
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/stretchr/testify/assert"
+
+	"github.com/stretchr/testify/require"
 
 	"github.com/ava-labs/avalanchego/ids"
 	"github.com/ava-labs/avalanchego/message"
 	"github.com/ava-labs/avalanchego/snow"
 	"github.com/ava-labs/avalanchego/snow/engine/common"
+	"github.com/ava-labs/avalanchego/snow/networking/tracker"
 	"github.com/ava-labs/avalanchego/snow/validators"
+	"github.com/ava-labs/avalanchego/utils/math/meter"
+	"github.com/ava-labs/avalanchego/utils/resource"
 )
 
 func TestHandlerDropsTimedOutMessages(t *testing.T) {
 	called := make(chan struct{})
 
 	metrics := prometheus.NewRegistry()
-	mc, err := message.NewCreator(metrics, true, "dummyNamespace", 10*time.Second)
-	assert.NoError(t, err)
+	mc, err := message.NewCreator(metrics, "dummyNamespace", true, 10*time.Second)
+	require.NoError(t, err)
 
 	ctx := snow.DefaultConsensusContextTest()
 
 	vdrs := validators.NewSet()
-	vdr0 := ids.GenerateTestShortID()
+	vdr0 := ids.GenerateTestNodeID()
 	err = vdrs.AddWeight(vdr0, 1)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
+	resourceTracker, err := tracker.NewResourceTracker(
+		prometheus.NewRegistry(),
+		resource.NoUsage,
+		meter.ContinuousFactory{},
+		time.Second,
+	)
+	require.NoError(t, err)
 	handlerIntf, err := New(
-		mc,
 		ctx,
 		vdrs,
 		nil,
 		nil,
 		time.Second,
+		resourceTracker,
 	)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	handler := handlerIntf.(*handler)
 
 	bootstrapper := &common.BootstrapperTest{
@@ -53,11 +65,11 @@ func TestHandlerDropsTimedOutMessages(t *testing.T) {
 	}
 	bootstrapper.Default(false)
 	bootstrapper.ContextF = func() *snow.ConsensusContext { return ctx }
-	bootstrapper.GetAcceptedFrontierF = func(nodeID ids.ShortID, requestID uint32) error {
+	bootstrapper.GetAcceptedFrontierF = func(ctx context.Context, nodeID ids.NodeID, requestID uint32) error {
 		t.Fatalf("GetAcceptedFrontier message should have timed out")
 		return nil
 	}
-	bootstrapper.GetAcceptedF = func(nodeID ids.ShortID, requestID uint32, containerIDs []ids.ID) error {
+	bootstrapper.GetAcceptedF = func(ctx context.Context, nodeID ids.NodeID, requestID uint32, containerIDs []ids.ID) error {
 		called <- struct{}{}
 		return nil
 	}
@@ -65,27 +77,26 @@ func TestHandlerDropsTimedOutMessages(t *testing.T) {
 	ctx.SetState(snow.Bootstrapping) // assumed bootstrapping is ongoing
 
 	pastTime := time.Now()
-	mc.SetTime(pastTime)
 	handler.clock.Set(pastTime)
 
-	nodeID := ids.ShortEmpty
+	nodeID := ids.EmptyNodeID
 	reqID := uint32(1)
-	deadline := time.Nanosecond
 	chainID := ids.ID{}
-	msg := mc.InboundGetAcceptedFrontier(chainID, reqID, deadline, nodeID)
-	handler.Push(msg)
+	msg := mc.InboundGetAcceptedFrontier(chainID, reqID, 0*time.Second, nodeID)
+	handler.Push(context.Background(), msg)
 
 	currentTime := time.Now().Add(time.Second)
-	mc.SetTime(currentTime)
 	handler.clock.Set(currentTime)
 
 	reqID++
-	msg = mc.InboundGetAccepted(chainID, reqID, deadline, nil, nodeID)
-	handler.Push(msg)
+	msg = mc.InboundGetAccepted(chainID, reqID, 1*time.Second, nil, nodeID)
+	handler.Push(context.Background(), msg)
+
+	bootstrapper.StartF = func(startReqID uint32) error { return nil }
 
 	handler.Start(false)
 
-	ticker := time.NewTicker(50 * time.Millisecond)
+	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	select {
 	case <-ticker.C:
@@ -99,21 +110,28 @@ func TestHandlerClosesOnError(t *testing.T) {
 	ctx := snow.DefaultConsensusContextTest()
 
 	vdrs := validators.NewSet()
-	err := vdrs.AddWeight(ids.GenerateTestShortID(), 1)
-	assert.NoError(t, err)
+	err := vdrs.AddWeight(ids.GenerateTestNodeID(), 1)
+	require.NoError(t, err)
 	metrics := prometheus.NewRegistry()
-	mc, err := message.NewCreator(metrics, true, "dummyNamespace", 10*time.Second)
-	assert.NoError(t, err)
+	mc, err := message.NewCreator(metrics, "dummyNamespace", true, 10*time.Second)
+	require.NoError(t, err)
 
+	resourceTracker, err := tracker.NewResourceTracker(
+		prometheus.NewRegistry(),
+		resource.NoUsage,
+		meter.ContinuousFactory{},
+		time.Second,
+	)
+	require.NoError(t, err)
 	handlerIntf, err := New(
-		mc,
 		ctx,
 		vdrs,
 		nil,
 		nil,
 		time.Second,
+		resourceTracker,
 	)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	handler := handlerIntf.(*handler)
 
 	handler.clock.Set(time.Now())
@@ -131,7 +149,7 @@ func TestHandlerClosesOnError(t *testing.T) {
 	}
 	bootstrapper.Default(false)
 	bootstrapper.ContextF = func() *snow.ConsensusContext { return ctx }
-	bootstrapper.GetAcceptedFrontierF = func(nodeID ids.ShortID, requestID uint32) error {
+	bootstrapper.GetAcceptedFrontierF = func(ctx context.Context, nodeID ids.NodeID, requestID uint32) error {
 		return errors.New("Engine error should cause handler to close")
 	}
 	handler.SetBootstrapper(bootstrapper)
@@ -145,15 +163,17 @@ func TestHandlerClosesOnError(t *testing.T) {
 	// should normally be handled
 	ctx.SetState(snow.Bootstrapping)
 
+	bootstrapper.StartF = func(startReqID uint32) error { return nil }
+
 	handler.Start(false)
 
-	nodeID := ids.ShortEmpty
+	nodeID := ids.EmptyNodeID
 	reqID := uint32(1)
 	deadline := time.Nanosecond
 	msg := mc.InboundGetAcceptedFrontier(ids.ID{}, reqID, deadline, nodeID)
-	handler.Push(msg)
+	handler.Push(context.Background(), msg)
 
-	ticker := time.NewTicker(20 * time.Millisecond)
+	ticker := time.NewTicker(time.Second)
 	select {
 	case <-ticker.C:
 		t.Fatalf("Handler shutdown timed out before calling toClose")
@@ -165,21 +185,25 @@ func TestHandlerDropsGossipDuringBootstrapping(t *testing.T) {
 	closed := make(chan struct{}, 1)
 	ctx := snow.DefaultConsensusContextTest()
 	vdrs := validators.NewSet()
-	err := vdrs.AddWeight(ids.GenerateTestShortID(), 1)
-	assert.NoError(t, err)
-	metrics := prometheus.NewRegistry()
-	mc, err := message.NewCreator(metrics, true, "dummyNamespace", 10*time.Second)
-	assert.NoError(t, err)
+	err := vdrs.AddWeight(ids.GenerateTestNodeID(), 1)
+	require.NoError(t, err)
 
+	resourceTracker, err := tracker.NewResourceTracker(
+		prometheus.NewRegistry(),
+		resource.NoUsage,
+		meter.ContinuousFactory{},
+		time.Second,
+	)
+	require.NoError(t, err)
 	handlerIntf, err := New(
-		mc,
 		ctx,
 		vdrs,
 		nil,
 		nil,
 		1,
+		resourceTracker,
 	)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	handler := handlerIntf.(*handler)
 
 	handler.clock.Set(time.Now())
@@ -194,22 +218,24 @@ func TestHandlerDropsGossipDuringBootstrapping(t *testing.T) {
 	}
 	bootstrapper.Default(false)
 	bootstrapper.ContextF = func() *snow.ConsensusContext { return ctx }
-	bootstrapper.GetFailedF = func(nodeID ids.ShortID, requestID uint32) error {
+	bootstrapper.GetFailedF = func(ctx context.Context, nodeID ids.NodeID, requestID uint32) error {
 		closed <- struct{}{}
 		return nil
 	}
 	handler.SetBootstrapper(bootstrapper)
 	ctx.SetState(snow.Bootstrapping) // assumed bootstrapping is ongoing
 
+	bootstrapper.StartF = func(startReqID uint32) error { return nil }
+
 	handler.Start(false)
 
-	nodeID := ids.ShortEmpty
+	nodeID := ids.EmptyNodeID
 	chainID := ids.Empty
 	reqID := uint32(1)
-	inMsg := mc.InternalFailedRequest(message.GetFailed, nodeID, chainID, reqID)
-	handler.Push(inMsg)
+	inMsg := message.InternalGetFailed(nodeID, chainID, reqID)
+	handler.Push(context.Background(), inMsg)
 
-	ticker := time.NewTicker(20 * time.Millisecond)
+	ticker := time.NewTicker(time.Second)
 	select {
 	case <-ticker.C:
 		t.Fatalf("Handler shutdown timed out before calling toClose")
@@ -223,21 +249,36 @@ func TestHandlerDispatchInternal(t *testing.T) {
 	ctx := snow.DefaultConsensusContextTest()
 	msgFromVMChan := make(chan common.Message)
 	vdrs := validators.NewSet()
-	err := vdrs.AddWeight(ids.GenerateTestShortID(), 1)
-	assert.NoError(t, err)
-	metrics := prometheus.NewRegistry()
-	mc, err := message.NewCreator(metrics, true, "dummyNamespace", 10*time.Second)
-	assert.NoError(t, err)
+	err := vdrs.AddWeight(ids.GenerateTestNodeID(), 1)
+	require.NoError(t, err)
 
+	resourceTracker, err := tracker.NewResourceTracker(
+		prometheus.NewRegistry(),
+		resource.NoUsage,
+		meter.ContinuousFactory{},
+		time.Second,
+	)
+	require.NoError(t, err)
 	handler, err := New(
-		mc,
 		ctx,
 		vdrs,
 		msgFromVMChan,
 		nil,
 		time.Second,
+		resourceTracker,
 	)
-	assert.NoError(t, err)
+	require.NoError(t, err)
+
+	bootstrapper := &common.BootstrapperTest{
+		BootstrapableTest: common.BootstrapableTest{
+			T: t,
+		},
+		EngineTest: common.EngineTest{
+			T: t,
+		},
+	}
+	bootstrapper.Default(false)
+	handler.SetBootstrapper(bootstrapper)
 
 	engine := &common.EngineTest{T: t}
 	engine.Default(false)
@@ -248,6 +289,8 @@ func TestHandlerDispatchInternal(t *testing.T) {
 	}
 	handler.SetConsensus(engine)
 	ctx.SetState(snow.NormalOp) // assumed bootstrapping is done
+
+	bootstrapper.StartF = func(startReqID uint32) error { return nil }
 
 	handler.Start(false)
 	msgFromVMChan <- 0

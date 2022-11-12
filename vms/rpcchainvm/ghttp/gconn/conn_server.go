@@ -1,4 +1,4 @@
-// Copyright (C) 2019-2021, Ava Labs, Inc. All rights reserved.
+// Copyright (C) 2019-2022, Ava Labs, Inc. All rights reserved.
 // See the file LICENSE for licensing terms.
 
 package gconn
@@ -15,11 +15,11 @@ import (
 	connpb "github.com/ava-labs/avalanchego/proto/pb/net/conn"
 )
 
-var _ connpb.ConnServer = &Server{}
+var _ connpb.ConnServer = (*Server)(nil)
 
 // Server is an http.Conn that is managed over RPC.
 type Server struct {
-	connpb.UnimplementedConnServer
+	connpb.UnsafeConnServer
 	conn   net.Conn
 	closer *grpcutils.ServerCloser
 }

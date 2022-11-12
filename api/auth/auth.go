@@ -1,4 +1,4 @@
-// Copyright (C) 2019-2021, Ava Labs, Inc. All rights reserved.
+// Copyright (C) 2019-2022, Ava Labs, Inc. All rights reserved.
 // See the file LICENSE for licensing terms.
 
 package auth
@@ -18,11 +18,10 @@ import (
 
 	"github.com/gorilla/rpc/v2"
 
+	"github.com/ava-labs/avalanchego/utils/json"
 	"github.com/ava-labs/avalanchego/utils/logging"
 	"github.com/ava-labs/avalanchego/utils/password"
 	"github.com/ava-labs/avalanchego/utils/timer/mockable"
-
-	cjson "github.com/ava-labs/avalanchego/utils/json"
 )
 
 const (
@@ -54,7 +53,7 @@ var (
 	errNoEndpoints                 = errors.New("must name at least one endpoint")
 	errTooManyEndpoints            = fmt.Errorf("can only name at most %d endpoints", maxEndpoints)
 
-	_ Auth = &auth{}
+	_ Auth = (*auth)(nil)
 )
 
 type Auth interface {
@@ -257,7 +256,7 @@ func (a *auth) ChangePassword(oldPW, newPW string) error {
 
 func (a *auth) CreateHandler() (http.Handler, error) {
 	server := rpc.NewServer()
-	codec := cjson.NewCodec()
+	codec := json.NewCodec()
 	server.RegisterCodec(codec, "application/json")
 	server.RegisterCodec(codec, "application/json;charset=UTF-8")
 	return server, server.RegisterService(

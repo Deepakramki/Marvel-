@@ -1,4 +1,4 @@
-// Copyright (C) 2019-2021, Ava Labs, Inc. All rights reserved.
+// Copyright (C) 2019-2022, Ava Labs, Inc. All rights reserved.
 // See the file LICENSE for licensing terms.
 
 package secp256k1fx
@@ -16,7 +16,7 @@ type VM interface {
 	Logger() logging.Logger
 }
 
-var _ VM = &TestVM{}
+var _ VM = (*TestVM)(nil)
 
 // TestVM is a minimal implementation of a VM
 type TestVM struct {

@@ -1,4 +1,4 @@
-// Copyright (C) 2019-2021, Ava Labs, Inc. All rights reserved.
+// Copyright (C) 2019-2022, Ava Labs, Inc. All rights reserved.
 // See the file LICENSE for licensing terms.
 
 package avax
@@ -14,7 +14,7 @@ var (
 	errNilAssetID   = errors.New("nil asset ID is not valid")
 	errEmptyAssetID = errors.New("empty asset ID is not valid")
 
-	_ verify.Verifiable = &Asset{}
+	_ verify.Verifiable = (*Asset)(nil)
 )
 
 type Asset struct {

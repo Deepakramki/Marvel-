@@ -1,4 +1,4 @@
-// Copyright (C) 2019-2021, Ava Labs, Inc. All rights reserved.
+// Copyright (C) 2019-2022, Ava Labs, Inc. All rights reserved.
 // See the file LICENSE for licensing terms.
 
 package block
@@ -14,7 +14,7 @@ var (
 	errVerifyHeightIndex  = errors.New("unexpectedly called VerifyHeightIndex")
 	errGetBlockIDAtHeight = errors.New("unexpectedly called GetBlockIDAtHeight")
 
-	_ HeightIndexedChainVM = &TestHeightIndexedVM{}
+	_ HeightIndexedChainVM = (*TestHeightIndexedVM)(nil)
 )
 
 // TestBatchedVM is a BatchedVM that is useful for testing.

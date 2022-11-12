@@ -1,4 +1,4 @@
-// Copyright (C) 2019-2021, Ava Labs, Inc. All rights reserved.
+// Copyright (C) 2019-2022, Ava Labs, Inc. All rights reserved.
 // See the file LICENSE for licensing terms.
 
 package snowball
@@ -9,7 +9,7 @@ import (
 	"github.com/ava-labs/avalanchego/ids"
 )
 
-var _ NnarySnowflake = &nnarySnowflake{}
+var _ NnarySnowflake = (*nnarySnowflake)(nil)
 
 // nnarySnowflake is the implementation of a snowflake instance with an
 // unbounded number of choices

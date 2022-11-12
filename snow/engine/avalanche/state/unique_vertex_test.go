@@ -1,4 +1,4 @@
-// Copyright (C) 2019-2021, Ava Labs, Inc. All rights reserved.
+// Copyright (C) 2019-2022, Ava Labs, Inc. All rights reserved.
 // See the file LICENSE for licensing terms.
 
 package state
@@ -528,6 +528,7 @@ func TestStopVertexVerifyUnexpectedDependencies(t *testing.T) {
 	if err := uvtx2.Accept(); err != nil {
 		t.Fatal(err)
 	}
+
 	uvtx3 := newTestUniqueVertex(t, ts, []ids.ID{uvtx1.id, uvtx2.id}, [][]byte{{'e'}, {'f'}}, false)
 	uvtx4 := newTestUniqueVertex(t, ts, []ids.ID{uvtx1.id, uvtx2.id}, [][]byte{{'g'}, {'h'}}, false)
 
@@ -561,6 +562,12 @@ func TestStopVertexVerifyUnexpectedDependencies(t *testing.T) {
 	svtx5 = newTestUniqueVertex(t, ts, []ids.ID{uvtx3.id, uvtx4.id}, nil, true)
 	if verr := svtx5.Verify(); verr != nil {
 		t.Fatalf("stop vertex 'Verify' expected nil, got %v", verr)
+	}
+	if err := uvtx3.Accept(); err != nil {
+		t.Fatal(err)
+	}
+	if err := uvtx4.Accept(); err != nil {
+		t.Fatal(err)
 	}
 	if err := svtx5.Accept(); err != nil {
 		t.Fatal(err)

@@ -1,4 +1,4 @@
-// Copyright (C) 2019-2021, Ava Labs, Inc. All rights reserved.
+// Copyright (C) 2019-2022, Ava Labs, Inc. All rights reserved.
 // See the file LICENSE for licensing terms.
 
 package rpcchainvm
@@ -14,27 +14,27 @@ import (
 	"github.com/hashicorp/go-plugin"
 
 	"github.com/ava-labs/avalanchego/snow"
+	"github.com/ava-labs/avalanchego/utils/resource"
 	"github.com/ava-labs/avalanchego/utils/subprocess"
+	"github.com/ava-labs/avalanchego/vms"
 	"github.com/ava-labs/avalanchego/vms/rpcchainvm/grpcutils"
 )
 
 var (
-	errWrongVM         = errors.New("wrong vm type")
-	_          Factory = &factory{}
+	errWrongVM = errors.New("wrong vm type")
+
+	_ vms.Factory = (*factory)(nil)
 )
 
-type Factory interface {
-	// New returns an instance of a virtual machine.
-	New(*snow.Context) (interface{}, error)
-}
-
 type factory struct {
-	path string
+	path           string
+	processTracker resource.ProcessTracker
 }
 
-func NewFactory(path string) Factory {
+func NewFactory(path string, processTracker resource.ProcessTracker) vms.Factory {
 	return &factory{
-		path: path,
+		path:           path,
+		processTracker: processTracker,
 	}
 }
 
@@ -98,7 +98,6 @@ func (f *factory) New(ctx *snow.Context) (interface{}, error) {
 		return nil, pluginErr(errWrongVM)
 	}
 
-	vm.SetProcess(client)
-	vm.ctx = ctx
+	vm.SetProcess(ctx, client, f.processTracker)
 	return vm, nil
 }

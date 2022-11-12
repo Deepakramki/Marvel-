@@ -1,4 +1,4 @@
-// Copyright (C) 2019-2021, Ava Labs, Inc. All rights reserved.
+// Copyright (C) 2019-2022, Ava Labs, Inc. All rights reserved.
 // See the file LICENSE for licensing terms.
 
 package avalanche
@@ -9,7 +9,7 @@ import (
 	"github.com/ava-labs/avalanchego/snow/consensus/snowstorm"
 )
 
-var _ Vertex = &TestVertex{}
+var _ Vertex = (*TestVertex)(nil)
 
 // TestVertex is a useful test vertex
 type TestVertex struct {

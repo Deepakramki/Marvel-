@@ -1,4 +1,4 @@
-// Copyright (C) 2019-2021, Ava Labs, Inc. All rights reserved.
+// Copyright (C) 2019-2022, Ava Labs, Inc. All rights reserved.
 // See the file LICENSE for licensing terms.
 
 package ghttp
@@ -16,7 +16,7 @@ import (
 	responsewriterpb "github.com/ava-labs/avalanchego/proto/pb/http/responsewriter"
 )
 
-var _ http.Handler = &Client{}
+var _ http.Handler = (*Client)(nil)
 
 // Client is an http.Handler that talks over RPC.
 type Client struct {
@@ -217,7 +217,7 @@ func getHTTPSimpleRequest(r *http.Request) (*httppb.HandleSimpleHTTPRequest, err
 // convertWriteResponse converts a gRPC HandleSimpleHTTPResponse to an HTTP response.
 func convertWriteResponse(w http.ResponseWriter, resp *httppb.HandleSimpleHTTPResponse) error {
 	grpcutils.MergeHTTPHeader(resp.Headers, w.Header())
-	w.WriteHeader(int(resp.Code))
+	w.WriteHeader(grpcutils.EnsureValidResponseCode(int(resp.Code)))
 	_, err := w.Write(resp.Body)
 	return err
 }

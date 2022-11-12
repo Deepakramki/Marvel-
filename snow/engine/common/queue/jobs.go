@@ -1,4 +1,4 @@
-// Copyright (C) 2019-2021, Ava Labs, Inc. All rights reserved.
+// Copyright (C) 2019-2022, Ava Labs, Inc. All rights reserved.
 // See the file LICENSE for licensing terms.
 
 package queue
@@ -7,6 +7,10 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+
+	"go.uber.org/zap"
+
 	"github.com/ava-labs/avalanchego/database"
 	"github.com/ava-labs/avalanchego/database/versiondb"
 	"github.com/ava-labs/avalanchego/ids"
@@ -14,14 +18,9 @@ import (
 	"github.com/ava-labs/avalanchego/snow/engine/common"
 	"github.com/ava-labs/avalanchego/utils/timer"
 	"github.com/ava-labs/avalanchego/utils/wrappers"
-	"github.com/prometheus/client_golang/prometheus"
 )
 
-const (
-	// StatusUpdateFrequency is how many containers should be processed between
-	// logs
-	StatusUpdateFrequency = 2500
-)
+const progressUpdateFrequency = 30 * time.Second
 
 // Jobs tracks a series of jobs that form a DAG of dependencies.
 type Jobs struct {
@@ -29,6 +28,8 @@ type Jobs struct {
 	db *versiondb.Database
 	// state writes the job queue to [db].
 	state *state
+	// Measures the ETA until bootstrapping finishes in nanoseconds.
+	etaMetric prometheus.Gauge
 }
 
 // New attempts to create a new job queue from the provided database.
@@ -43,10 +44,17 @@ func New(
 		return nil, fmt.Errorf("couldn't create new jobs state: %w", err)
 	}
 
+	etaMetric := prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace: metricsNamespace,
+		Name:      "eta_execution_complete",
+		Help:      "ETA in nanoseconds until execution phase of bootstrapping finishes",
+	})
+
 	return &Jobs{
-		db:    vdb,
-		state: state,
-	}, nil
+		db:        vdb,
+		state:     state,
+		etaMetric: etaMetric,
+	}, metricsRegisterer.Register(etaMetric)
 }
 
 // SetParser tells this job queue how to parse jobs from the database.
@@ -93,13 +101,14 @@ func (j *Jobs) Push(job Job) (bool, error) {
 	return true, nil
 }
 
-func (j *Jobs) ExecuteAll(ctx *snow.ConsensusContext, halter common.Haltable, restarted bool, events ...snow.EventDispatcher) (int, error) {
+func (j *Jobs) ExecuteAll(ctx *snow.ConsensusContext, halter common.Haltable, restarted bool, acceptors ...snow.Acceptor) (int, error) {
 	ctx.Executing(true)
 	defer ctx.Executing(false)
 
 	numExecuted := 0
 	numToExecute := j.state.numJobs
 	startTime := time.Now()
+	lastProgressUpdate := startTime
 
 	// Disable and clear state caches to prevent us from attempting to execute
 	// a vertex that was previously parsed, but not saved to the VM. Some VMs
@@ -111,7 +120,9 @@ func (j *Jobs) ExecuteAll(ctx *snow.ConsensusContext, halter common.Haltable, re
 	j.state.DisableCaching()
 	for {
 		if halter.Halted() {
-			ctx.Log.Info("Interrupted execution after executing %d operations", numExecuted)
+			ctx.Log.Info("interrupted execution",
+				zap.Int("numExecuted", numExecuted),
+			)
 			return numExecuted, nil
 		}
 
@@ -124,11 +135,14 @@ func (j *Jobs) ExecuteAll(ctx *snow.ConsensusContext, halter common.Haltable, re
 		}
 
 		jobID := job.ID()
-		ctx.Log.Debug("Executing: %s", jobID)
-		// Note that event.Accept must be called before executing [job]
-		// to honor EventDispatcher.Accept's invariant.
-		for _, event := range events {
-			if err := event.Accept(ctx, job.ID(), job.Bytes()); err != nil {
+		ctx.Log.Debug("executing",
+			zap.Stringer("jobID", jobID),
+		)
+		jobBytes := job.Bytes()
+		// Note that acceptor.Accept must be called before executing [job] to
+		// honor Acceptor.Accept's invariant.
+		for _, acceptor := range acceptors {
+			if err := acceptor.Accept(ctx, jobID, jobBytes); err != nil {
 				return numExecuted, err
 			}
 		}
@@ -162,25 +176,43 @@ func (j *Jobs) ExecuteAll(ctx *snow.ConsensusContext, halter common.Haltable, re
 		}
 
 		numExecuted++
-		if numExecuted%StatusUpdateFrequency == 0 { // Periodically print progress
+		if time.Since(lastProgressUpdate) > progressUpdateFrequency { // Periodically print progress
 			eta := timer.EstimateETA(
 				startTime,
 				uint64(numExecuted),
 				numToExecute,
 			)
+			j.etaMetric.Set(float64(eta))
 
 			if !restarted {
-				ctx.Log.Info("executed %d of %d operations. ETA = %s", numExecuted, numToExecute, eta)
+				ctx.Log.Info("executing operations",
+					zap.Int("numExecuted", numExecuted),
+					zap.Uint64("numToExecute", numToExecute),
+					zap.Duration("eta", eta),
+				)
 			} else {
-				ctx.Log.Debug("executed %d of %d  operations. ETA = %s", numExecuted, numToExecute, eta)
+				ctx.Log.Debug("executing operations",
+					zap.Int("numExecuted", numExecuted),
+					zap.Uint64("numToExecute", numToExecute),
+					zap.Duration("eta", eta),
+				)
 			}
+
+			lastProgressUpdate = time.Now()
 		}
 	}
 
+	// Now that executing has finished, zero out the ETA.
+	j.etaMetric.Set(0)
+
 	if !restarted {
-		ctx.Log.Info("executed %d operations", numExecuted)
+		ctx.Log.Info("executed operations",
+			zap.Int("numExecuted", numExecuted),
+		)
 	} else {
-		ctx.Log.Debug("executed %d operations", numExecuted)
+		ctx.Log.Debug("executed operations",
+			zap.Int("numExecuted", numExecuted),
+		)
 	}
 	return numExecuted, nil
 }

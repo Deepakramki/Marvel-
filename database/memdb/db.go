@@ -1,4 +1,4 @@
-// Copyright (C) 2019-2021, Ava Labs, Inc. All rights reserved.
+// Copyright (C) 2019-2022, Ava Labs, Inc. All rights reserved.
 // See the file LICENSE for licensing terms.
 
 package memdb
@@ -22,9 +22,9 @@ const (
 )
 
 var (
-	_ database.Database = &Database{}
-	_ database.Batch    = &batch{}
-	_ database.Iterator = &iterator{}
+	_ database.Database = (*Database)(nil)
+	_ database.Batch    = (*batch)(nil)
+	_ database.Iterator = (*iterator)(nil)
 )
 
 // Database is an ephemeral key-value store that implements the Database
@@ -147,8 +147,6 @@ func (db *Database) NewIteratorWithStartAndPrefix(start, prefix []byte) database
 	}
 }
 
-func (db *Database) Stat(property string) (string, error) { return "", database.ErrNotFound }
-
 func (db *Database) Compact(start []byte, limit []byte) error {
 	db.lock.RLock()
 	defer db.lock.RUnlock()
@@ -157,6 +155,13 @@ func (db *Database) Compact(start []byte, limit []byte) error {
 		return database.ErrClosed
 	}
 	return nil
+}
+
+func (db *Database) HealthCheck() (interface{}, error) {
+	if db.isClosed() {
+		return nil, database.ErrClosed
+	}
+	return nil, nil
 }
 
 type keyValue struct {

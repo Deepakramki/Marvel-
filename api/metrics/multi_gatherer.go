@@ -1,4 +1,4 @@
-// Copyright (C) 2019-2021, Ava Labs, Inc. All rights reserved.
+// Copyright (C) 2019-2022, Ava Labs, Inc. All rights reserved.
 // See the file LICENSE for licensing terms.
 
 package metrics
@@ -17,7 +17,7 @@ import (
 var (
 	errDuplicatedPrefix = errors.New("duplicated prefix")
 
-	_ MultiGatherer = &multiGatherer{}
+	_ MultiGatherer = (*multiGatherer)(nil)
 )
 
 // MultiGatherer extends the Gatherer interface by allowing additional gatherers

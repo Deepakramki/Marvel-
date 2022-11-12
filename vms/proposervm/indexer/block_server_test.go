@@ -1,4 +1,4 @@
-// Copyright (C) 2019-2021, Ava Labs, Inc. All rights reserved.
+// Copyright (C) 2019-2022, Ava Labs, Inc. All rights reserved.
 // See the file LICENSE for licensing terms.
 
 package indexer
@@ -15,7 +15,7 @@ var (
 	errGetWrappingBlk = errors.New("unexpectedly called GetWrappingBlk")
 	errCommit         = errors.New("unexpectedly called Commit")
 
-	_ BlockServer = &TestBlockServer{}
+	_ BlockServer = (*TestBlockServer)(nil)
 )
 
 // TestBatchedVM is a BatchedVM that is useful for testing.

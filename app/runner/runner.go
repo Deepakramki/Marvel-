@@ -1,4 +1,4 @@
-// Copyright (C) 2019-2021, Ava Labs, Inc. All rights reserved.
+// Copyright (C) 2019-2022, Ava Labs, Inc. All rights reserved.
 // See the file LICENSE for licensing terms.
 
 package runner
@@ -9,6 +9,8 @@ import (
 
 	"github.com/hashicorp/go-hclog"
 	"github.com/hashicorp/go-plugin"
+
+	"golang.org/x/term"
 
 	"github.com/ava-labs/avalanchego/app"
 	"github.com/ava-labs/avalanchego/app/process"
@@ -37,7 +39,9 @@ func Run(config Config, nodeConfig node.Config) {
 		return
 	}
 
-	fmt.Println(process.Header)
+	if term.IsTerminal(int(os.Stdout.Fd())) {
+		fmt.Println(process.Header)
+	}
 
 	exitCode := app.Run(nodeApp)
 	os.Exit(exitCode)

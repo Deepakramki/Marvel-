@@ -1,9 +1,11 @@
-// Copyright (C) 2019-2021, Ava Labs, Inc. All rights reserved.
+// Copyright (C) 2019-2022, Ava Labs, Inc. All rights reserved.
 // See the file LICENSE for licensing terms.
 
 package snowman
 
 import (
+	"time"
+
 	"github.com/ava-labs/avalanchego/ids"
 	"github.com/ava-labs/avalanchego/snow"
 	"github.com/ava-labs/avalanchego/snow/consensus/snowball"
@@ -18,6 +20,7 @@ type Consensus interface {
 		params snowball.Parameters,
 		lastAcceptedID ids.ID,
 		lastAcceptedHeight uint64,
+		lastAcceptedTime time.Time,
 	) error
 
 	// Returns the parameters that describe this snowman instance

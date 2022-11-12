@@ -2,7 +2,24 @@ syntax = "proto3";
 
 package rpcdb;
 
+import "google/protobuf/empty.proto";
+
 option go_package = "github.com/ava-labs/avalanchego/proto/pb/rpcdb";
+
+service Database {
+  rpc Has(HasRequest) returns (HasResponse);
+  rpc Get(GetRequest) returns (GetResponse);
+  rpc Put(PutRequest) returns (PutResponse);
+  rpc Delete(DeleteRequest) returns (DeleteResponse);
+  rpc Compact(CompactRequest) returns (CompactResponse);
+  rpc Close(CloseRequest) returns (CloseResponse);
+  rpc HealthCheck(google.protobuf.Empty) returns (HealthCheckResponse);
+  rpc WriteBatch(WriteBatchRequest) returns (WriteBatchResponse);
+  rpc NewIteratorWithStartAndPrefix(NewIteratorWithStartAndPrefixRequest) returns (NewIteratorWithStartAndPrefixResponse);
+  rpc IteratorNext(IteratorNextRequest) returns (IteratorNextResponse);
+  rpc IteratorError(IteratorErrorRequest) returns (IteratorErrorResponse);
+  rpc IteratorRelease(IteratorReleaseRequest) returns (IteratorReleaseResponse);
+}
 
 message HasRequest {
   bytes key = 1;
@@ -37,15 +54,6 @@ message DeleteRequest {
 
 message DeleteResponse {
   uint32 err = 1;
-}
-
-message StatRequest {
-  string property = 1;
-}
-
-message StatResponse {
-  string stat = 1;
-  uint32 err = 2;
 }
 
 message CompactRequest {
@@ -109,20 +117,6 @@ message IteratorReleaseResponse {
   uint32 err = 1;
 }
 
-service Database {
-  rpc Has(HasRequest) returns (HasResponse);
-  rpc Get(GetRequest) returns (GetResponse);
-  rpc Put(PutRequest) returns (PutResponse);
-  rpc Delete(DeleteRequest) returns (DeleteResponse);
-  rpc Stat(StatRequest) returns (StatResponse);
-  rpc Compact(CompactRequest) returns (CompactResponse);
-  rpc Close(CloseRequest) returns (CloseResponse);
-
-  rpc WriteBatch(WriteBatchRequest) returns (WriteBatchResponse);
-
-  rpc NewIteratorWithStartAndPrefix(NewIteratorWithStartAndPrefixRequest) returns (NewIteratorWithStartAndPrefixResponse);
-
-  rpc IteratorNext(IteratorNextRequest) returns (IteratorNextResponse);
-  rpc IteratorError(IteratorErrorRequest) returns (IteratorErrorResponse);
-  rpc IteratorRelease(IteratorReleaseRequest) returns (IteratorReleaseResponse);
+message HealthCheckResponse {
+  bytes details = 1;
 }

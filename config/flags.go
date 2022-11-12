@@ -1,4 +1,4 @@
-// Copyright (C) 2019-2021, Ava Labs, Inc. All rights reserved.
+// Copyright (C) 2019-2022, Ava Labs, Inc. All rights reserved.
 // See the file LICENSE for licensing terms.
 
 package config
@@ -9,35 +9,45 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"time"
 
 	"github.com/kardianos/osext"
 
+	"github.com/spf13/viper"
+
 	"github.com/ava-labs/avalanchego/database/leveldb"
 	"github.com/ava-labs/avalanchego/database/memdb"
-	"github.com/ava-labs/avalanchego/database/rocksdb"
 	"github.com/ava-labs/avalanchego/genesis"
+	"github.com/ava-labs/avalanchego/trace"
 	"github.com/ava-labs/avalanchego/utils/constants"
 	"github.com/ava-labs/avalanchego/utils/ulimit"
 	"github.com/ava-labs/avalanchego/utils/units"
 )
 
-// Results of parsing the CLI
+const (
+	DefaultHTTPPort    = 9650
+	DefaultStakingPort = 9651
+
+	AvalancheGoDataDirVar    = "AVALANCHEGO_DATA_DIR"
+	defaultUnexpandedDataDir = "$" + AvalancheGoDataDirVar
+)
+
 var (
-	defaultNetworkName     = constants.MainnetName
-	homeDir                = os.ExpandEnv("$HOME")
-	prefixedAppName        = fmt.Sprintf(".%s", constants.AppName)
-	defaultDataDir         = filepath.Join(homeDir, prefixedAppName)
-	defaultDBDir           = filepath.Join(defaultDataDir, "db")
-	defaultProfileDir      = filepath.Join(defaultDataDir, "profiles")
-	defaultStakingPath     = filepath.Join(defaultDataDir, "staking")
-	defaultStakingKeyPath  = filepath.Join(defaultStakingPath, "staker.key")
-	defaultStakingCertPath = filepath.Join(defaultStakingPath, "staker.crt")
-	defaultConfigDir       = filepath.Join(defaultDataDir, "configs")
-	defaultChainConfigDir  = filepath.Join(defaultConfigDir, "chains")
-	defaultVMConfigDir     = filepath.Join(defaultConfigDir, "vms")
-	defaultVMAliasFilePath = filepath.Join(defaultVMConfigDir, "aliases.json")
-	defaultSubnetConfigDir = filepath.Join(defaultConfigDir, "subnets")
+	// [defaultUnexpandedDataDir] will be expanded when reading the flags
+	defaultDataDir              = filepath.Join("$HOME", ".avalanchego")
+	defaultDBDir                = filepath.Join(defaultUnexpandedDataDir, "db")
+	defaultLogDir               = filepath.Join(defaultUnexpandedDataDir, "logs")
+	defaultProfileDir           = filepath.Join(defaultUnexpandedDataDir, "profiles")
+	defaultStakingPath          = filepath.Join(defaultUnexpandedDataDir, "staking")
+	defaultStakingTLSKeyPath    = filepath.Join(defaultStakingPath, "staker.key")
+	defaultStakingCertPath      = filepath.Join(defaultStakingPath, "staker.crt")
+	defaultStakingSignerKeyPath = filepath.Join(defaultStakingPath, "signer.key")
+	defaultConfigDir            = filepath.Join(defaultUnexpandedDataDir, "configs")
+	defaultChainConfigDir       = filepath.Join(defaultConfigDir, "chains")
+	defaultVMConfigDir          = filepath.Join(defaultConfigDir, "vms")
+	defaultVMAliasFilePath      = filepath.Join(defaultVMConfigDir, "aliases.json")
+	defaultSubnetConfigDir      = filepath.Join(defaultConfigDir, "subnets")
 
 	// Places to look for the build directory
 	defaultBuildDirs = []string{}
@@ -56,7 +66,7 @@ func init() {
 	defaultBuildDirs = append(defaultBuildDirs,
 		wd,
 		filepath.Join("/", "usr", "local", "lib", constants.AppName),
-		defaultDataDir,
+		defaultUnexpandedDataDir,
 	)
 }
 
@@ -72,6 +82,8 @@ func addProcessFlags(fs *flag.FlagSet) {
 }
 
 func addNodeFlags(fs *flag.FlagSet) {
+	// Home directory
+	fs.String(DataDirKey, defaultDataDir, "Sets the base data directory where default sub-directories will be placed unless otherwise specified.")
 	// System
 	fs.Uint64(FdLimitKey, ulimit.DefaultFDLimit, "Attempts to raise the process file descriptor limit to at least this value and error if the value is above the system max")
 
@@ -86,32 +98,35 @@ func addNodeFlags(fs *flag.FlagSet) {
 	fs.String(GenesisConfigContentKey, "", "Specifies base64 encoded genesis content")
 
 	// Network ID
-	fs.String(NetworkNameKey, defaultNetworkName, "Network ID this node will connect to")
+	fs.String(NetworkNameKey, constants.MainnetName, "Network ID this node will connect to")
 
 	// AVAX fees
 	fs.Uint64(TxFeeKey, genesis.LocalParams.TxFee, "Transaction fee, in nAVAX")
 	fs.Uint64(CreateAssetTxFeeKey, genesis.LocalParams.CreateAssetTxFee, "Transaction fee, in nAVAX, for transactions that create new assets")
 	fs.Uint64(CreateSubnetTxFeeKey, genesis.LocalParams.CreateSubnetTxFee, "Transaction fee, in nAVAX, for transactions that create new subnets")
+	fs.Uint64(TransformSubnetTxFeeKey, genesis.LocalParams.TransformSubnetTxFee, "Transaction fee, in nAVAX, for transactions that transform subnets")
 	fs.Uint64(CreateBlockchainTxFeeKey, genesis.LocalParams.CreateBlockchainTxFee, "Transaction fee, in nAVAX, for transactions that create new blockchains")
+	fs.Uint64(AddPrimaryNetworkValidatorFeeKey, genesis.LocalParams.AddPrimaryNetworkValidatorFee, "Transaction fee, in nAVAX, for transactions that add new primary network validators")
+	fs.Uint64(AddPrimaryNetworkDelegatorFeeKey, genesis.LocalParams.AddPrimaryNetworkDelegatorFee, "Transaction fee, in nAVAX, for transactions that add new primary network delegators")
+	fs.Uint64(AddSubnetValidatorFeeKey, genesis.LocalParams.AddSubnetValidatorFee, "Transaction fee, in nAVAX, for transactions that add new subnet validators")
+	fs.Uint64(AddSubnetDelegatorFeeKey, genesis.LocalParams.AddSubnetDelegatorFee, "Transaction fee, in nAVAX, for transactions that add new subnet delegators")
 
 	// Database
-	fs.String(DBTypeKey, leveldb.Name, fmt.Sprintf("Database type to use. Should be one of {%s, %s, %s}", leveldb.Name, rocksdb.Name, memdb.Name))
+	fs.String(DBTypeKey, leveldb.Name, fmt.Sprintf("Database type to use. Should be one of {%s, %s}", leveldb.Name, memdb.Name))
 	fs.String(DBPathKey, defaultDBDir, "Path to database directory")
 	fs.String(DBConfigFileKey, "", fmt.Sprintf("Path to database config file. Ignored if %s is specified", DBConfigContentKey))
 	fs.String(DBConfigContentKey, "", "Specifies base64 encoded database config content")
 
 	// Logging
-	fs.String(LogsDirKey, "", "Logging directory for Avalanche")
+	fs.String(LogsDirKey, defaultLogDir, "Logging directory for Avalanche")
 	fs.String(LogLevelKey, "info", "The log level. Should be one of {verbo, debug, trace, info, warn, error, fatal, off}")
 	fs.String(LogDisplayLevelKey, "", "The log display level. If left blank, will inherit the value of log-level. Otherwise, should be one of {verbo, debug, trace, info, warn, error, fatal, off}")
-	fs.String(LogDisplayHighlightKey, "auto", "Whether to color/highlight display logs. Default highlights when the output is a terminal. Otherwise, should be one of {auto, plain, colors}")
+	fs.String(LogFormatKey, "auto", "The structure of log format. Defaults to 'auto' which formats terminal-like logs, when the output is a terminal. Otherwise, should be one of {auto, plain, colors, json}")
+	fs.Uint(LogRotaterMaxSizeKey, 8, "The maximum file size in megabytes of the log file before it gets rotated.")
+	fs.Uint(LogRotaterMaxFilesKey, 7, "The maximum number of old log files to retain. 0 means retain all old log files.")
+	fs.Uint(LogRotaterMaxAgeKey, 0, "The maximum number of days to retain old log files based on the timestamp encoded in their filename. 0 means retain all old log files.")
+	fs.Bool(LogRotaterCompressEnabledKey, false, "Enables the compression of rotated log files through gzip.")
 	fs.Bool(LogDisableDisplayPluginLogsKey, false, "Disables displaying plugin logs in stdout.")
-
-	// Assertions
-	fs.Bool(AssertionsEnabledKey, true, "Turn on assertion execution")
-
-	// Signature Verification
-	fs.Bool(SignatureVerificationEnabledKey, true, "Turn on signature verification")
 
 	// Peer List Gossip
 	gossipHelpMsg := fmt.Sprintf(
@@ -122,16 +137,16 @@ func addNodeFlags(fs *flag.FlagSet) {
 		NetworkPeerListPeersGossipSizeKey,
 		NetworkPeerListGossipFreqKey,
 	)
-	fs.Uint(NetworkPeerListNumValidatorIPsKey, 20, gossipHelpMsg)
-	fs.Uint(NetworkPeerListValidatorGossipSizeKey, 25, gossipHelpMsg)
-	fs.Uint(NetworkPeerListNonValidatorGossipSizeKey, 25, gossipHelpMsg)
-	fs.Uint(NetworkPeerListPeersGossipSizeKey, 0, gossipHelpMsg)
+	fs.Uint(NetworkPeerListNumValidatorIPsKey, 15, gossipHelpMsg)
+	fs.Uint(NetworkPeerListValidatorGossipSizeKey, 20, gossipHelpMsg)
+	fs.Uint(NetworkPeerListNonValidatorGossipSizeKey, 0, gossipHelpMsg)
+	fs.Uint(NetworkPeerListPeersGossipSizeKey, 10, gossipHelpMsg)
 	fs.Duration(NetworkPeerListGossipFreqKey, time.Minute, gossipHelpMsg)
 
 	// Public IP Resolution
 	fs.String(PublicIPKey, "", "Public IP of this node for P2P communication. If empty, try to discover with NAT. Ignored if dynamic-public-ip is non-empty")
-	fs.Duration(DynamicUpdateDurationKey, 5*time.Minute, "Dynamic IP and NAT Traversal update duration")
-	fs.String(DynamicPublicIPResolverKey, "", "'ifconfigco' (alias 'ifconfig') or 'opendns' or 'ifconfigme'. By default does not do dynamic public IP updates. If non-empty, ignores public-ip argument")
+	fs.Duration(PublicIPResolutionFreqKey, 5*time.Minute, "Frequency at which this node resolves/updates its public IP and renew NAT mappings, if applicable")
+	fs.String(PublicIPResolutionServiceKey, "", "Only acceptable values are 'ifconfigco', 'opendns' or 'ifconfigme'. When provided, the node will use that service to periodically resolve/update its public IP")
 
 	// Inbound Connection Throttling
 	fs.Duration(InboundConnUpgradeThrottlerCooldownKey, 10*time.Second, "Upgrade an inbound connection from a given IP at most once per this duration. If 0, don't rate-limit inbound connection upgrades")
@@ -157,6 +172,8 @@ func addNodeFlags(fs *flag.FlagSet) {
 	fs.Uint(NetworkPeerReadBufferSizeKey, 8*units.KiB, "Size, in bytes, of the buffer that we read peer messages into (there is one buffer per peer)")
 	fs.Uint(NetworkPeerWriteBufferSizeKey, 8*units.KiB, "Size, in bytes, of the buffer that we write peer messages into (there is one buffer per peer)")
 
+	fs.String(NetworkTLSKeyLogFileKey, "", "TLS key log file path. Should only be specified for debugging")
+
 	// Benchlist
 	fs.Int(BenchlistFailThresholdKey, 10, "Number of consecutive failed queries before benchlisting a node")
 	fs.Duration(BenchlistDurationKey, 15*time.Minute, "Max amount of time a peer is benchlisted after surpassing the threshold")
@@ -167,10 +184,10 @@ func addNodeFlags(fs *flag.FlagSet) {
 	fs.Duration(ConsensusShutdownTimeoutKey, 30*time.Second, "Timeout before killing an unresponsive chain")
 	fs.Uint(ConsensusGossipAcceptedFrontierValidatorSizeKey, 0, "Number of validators to gossip to when gossiping accepted frontier")
 	fs.Uint(ConsensusGossipAcceptedFrontierNonValidatorSizeKey, 0, "Number of non-validators to gossip to when gossiping accepted frontier")
-	fs.Uint(ConsensusGossipAcceptedFrontierPeerSizeKey, 35, "Number of peers to gossip to when gossiping accepted frontier")
+	fs.Uint(ConsensusGossipAcceptedFrontierPeerSizeKey, 15, "Number of peers to gossip to when gossiping accepted frontier")
 	fs.Uint(ConsensusGossipOnAcceptValidatorSizeKey, 0, "Number of validators to gossip to each accepted container to")
 	fs.Uint(ConsensusGossipOnAcceptNonValidatorSizeKey, 0, "Number of non-validators to gossip to each accepted container to")
-	fs.Uint(ConsensusGossipOnAcceptPeerSizeKey, 20, "Number of peers to gossip to each accepted container to")
+	fs.Uint(ConsensusGossipOnAcceptPeerSizeKey, 10, "Number of peers to gossip to each accepted container to")
 	fs.Uint(AppGossipValidatorSizeKey, 10, "Number of validators to gossip an AppGossip message to")
 	fs.Uint(AppGossipNonValidatorSizeKey, 0, "Number of non-validators to gossip an AppGossip message to")
 	fs.Uint(AppGossipPeerSizeKey, 0, "Number of peers (which may be validators or non-validators) to gossip an AppGossip message to")
@@ -178,19 +195,21 @@ func addNodeFlags(fs *flag.FlagSet) {
 	// Inbound Throttling
 	fs.Uint64(InboundThrottlerAtLargeAllocSizeKey, 6*units.MiB, "Size, in bytes, of at-large byte allocation in inbound message throttler")
 	fs.Uint64(InboundThrottlerVdrAllocSizeKey, 32*units.MiB, "Size, in bytes, of validator byte allocation in inbound message throttler")
-	fs.Uint64(InboundThrottlerNodeMaxAtLargeBytesKey, uint64(constants.DefaultMaxMessageSize), "Max number of bytes a node can take from the inbound message throttler's at-large allocation.  Must be at least the max message size")
+	fs.Uint64(InboundThrottlerNodeMaxAtLargeBytesKey, constants.DefaultMaxMessageSize, "Max number of bytes a node can take from the inbound message throttler's at-large allocation.  Must be at least the max message size")
 	fs.Uint64(InboundThrottlerMaxProcessingMsgsPerNodeKey, 1024, "Max number of messages currently processing from a given node")
 	fs.Uint64(InboundThrottlerBandwidthRefillRateKey, 512*units.KiB, "Max average inbound bandwidth usage of a peer, in bytes per second. See BandwidthThrottler")
-	fs.Uint64(InboundThrottlerBandwidthMaxBurstSizeKey, uint64(constants.DefaultMaxMessageSize), "Max inbound bandwidth a node can use at once. Must be at least the max message size. See BandwidthThrottler")
+	fs.Uint64(InboundThrottlerBandwidthMaxBurstSizeKey, constants.DefaultMaxMessageSize, "Max inbound bandwidth a node can use at once. Must be at least the max message size. See BandwidthThrottler")
+	fs.Duration(InboundThrottlerCPUMaxRecheckDelayKey, 5*time.Second, "In the CPU-based network throttler, check at least this often whether the node's CPU usage has fallen to an acceptable level")
+	fs.Duration(InboundThrottlerDiskMaxRecheckDelayKey, 5*time.Second, "In the disk-based network throttler, check at least this often whether the node's disk usage has fallen to an acceptable level")
 
 	// Outbound Throttling
-	fs.Uint64(OutboundThrottlerAtLargeAllocSizeKey, 6*units.MiB, "Size, in bytes, of at-large byte allocation in outbound message throttler")
+	fs.Uint64(OutboundThrottlerAtLargeAllocSizeKey, 32*units.MiB, "Size, in bytes, of at-large byte allocation in outbound message throttler")
 	fs.Uint64(OutboundThrottlerVdrAllocSizeKey, 32*units.MiB, "Size, in bytes, of validator byte allocation in outbound message throttler")
-	fs.Uint64(OutboundThrottlerNodeMaxAtLargeBytesKey, uint64(constants.DefaultMaxMessageSize), "Max number of bytes a node can take from the outbound message throttler's at-large allocation.  Must be at least the max message size")
+	fs.Uint64(OutboundThrottlerNodeMaxAtLargeBytesKey, constants.DefaultMaxMessageSize, "Max number of bytes a node can take from the outbound message throttler's at-large allocation.  Must be at least the max message size")
 
 	// HTTP APIs
 	fs.String(HTTPHostKey, "127.0.0.1", "Address of the HTTP server")
-	fs.Uint(HTTPPortKey, 9650, "Port of the HTTP server")
+	fs.Uint(HTTPPortKey, DefaultHTTPPort, "Port of the HTTP server")
 	fs.Bool(HTTPSEnabledKey, false, "Upgrade the HTTP server to HTTPs")
 	fs.String(HTTPSKeyFileKey, "", fmt.Sprintf("TLS private key file for the HTTPs server. Ignored if %s is specified", HTTPSKeyContentKey))
 	fs.String(HTTPSKeyContentKey, "", "Specifies base64 encoded TLS private key for the HTTPs server")
@@ -228,13 +247,17 @@ func addNodeFlags(fs *flag.FlagSet) {
 	fs.Duration(NetworkHealthMaxOutstandingDurationKey, 5*time.Minute, "Node reports unhealthy if there has been a request outstanding for this duration")
 
 	// Staking
-	fs.Uint(StakingPortKey, 9651, "Port of the consensus server")
+	fs.Uint(StakingPortKey, DefaultStakingPort, "Port of the consensus server")
 	fs.Bool(StakingEnabledKey, true, "Enable staking. If enabled, Network TLS is required")
-	fs.Bool(StakingEphemeralCertEnabledKey, false, "If true, the node uses an ephemeral staking key and certificate, and has an ephemeral node ID")
-	fs.String(StakingKeyPathKey, defaultStakingKeyPath, fmt.Sprintf("Path to the TLS private key for staking. Ignored if %s is specified", StakingKeyContentKey))
-	fs.String(StakingKeyContentKey, "", "Specifies base64 encoded TLS private key for staking")
+	fs.Bool(StakingEphemeralCertEnabledKey, false, "If true, the node uses an ephemeral staking TLS key and certificate, and has an ephemeral node ID")
+	fs.String(StakingTLSKeyPathKey, defaultStakingTLSKeyPath, fmt.Sprintf("Path to the TLS private key for staking. Ignored if %s is specified", StakingTLSKeyContentKey))
+	fs.String(StakingTLSKeyContentKey, "", "Specifies base64 encoded TLS private key for staking")
 	fs.String(StakingCertPathKey, defaultStakingCertPath, fmt.Sprintf("Path to the TLS certificate for staking. Ignored if %s is specified", StakingCertContentKey))
 	fs.String(StakingCertContentKey, "", "Specifies base64 encoded TLS certificate for staking")
+	fs.Bool(StakingEphemeralSignerEnabledKey, false, "If true, the node uses an ephemeral staking signer key")
+	fs.String(StakingSignerKeyPathKey, defaultStakingSignerKeyPath, fmt.Sprintf("Path to the signer private key for staking. Ignored if %s is specified", StakingSignerKeyContentKey))
+	fs.String(StakingSignerKeyContentKey, "", "Specifies base64 encoded signer private key for staking")
+
 	fs.Uint64(StakingDisabledWeightKey, 100, "Weight to provide to each peer when staking is disabled")
 	// Uptime Requirement
 	fs.Float64(UptimeRequirementKey, genesis.LocalParams.UptimeRequirement, "Fraction of time a validator must be online to receive rewards")
@@ -257,12 +280,16 @@ func addNodeFlags(fs *flag.FlagSet) {
 	// Subnets
 	fs.String(WhitelistedSubnetsKey, "", "Whitelist of subnets to validate")
 
+	// State syncing
+	fs.String(StateSyncIPsKey, "", "Comma separated list of state sync peer ips to connect to. Example: 127.0.0.1:9630,127.0.0.1:9631")
+	fs.String(StateSyncIDsKey, "", "Comma separated list of state sync peer ids to connect to. Example: NodeID-JR4dVmy6ffUGAKCBDkyCbeZbyHQBeDsET,NodeID-8CrVPQZ4VSqgL8zTdvL14G8HqAfrBr4z")
+
 	// Bootstrapping
 	fs.String(BootstrapIPsKey, "", "Comma separated list of bootstrap peer ips to connect to. Example: 127.0.0.1:9630,127.0.0.1:9631")
 	fs.String(BootstrapIDsKey, "", "Comma separated list of bootstrap peer ids to connect to. Example: NodeID-JR4dVmy6ffUGAKCBDkyCbeZbyHQBeDsET,NodeID-8CrVPQZ4VSqgL8zTdvL14G8HqAfrBr4z")
 	fs.Bool(RetryBootstrapKey, true, "Specifies whether bootstrap should be retried")
 	fs.Int(RetryBootstrapWarnFrequencyKey, 50, "Specifies how many times bootstrap should be retried before warning the operator")
-	fs.Duration(BootstrapBeaconConnectionTimeoutKey, time.Minute, "Timeout when attempting to connect to bootstrapping beacons")
+	fs.Duration(BootstrapBeaconConnectionTimeoutKey, time.Minute, "Timeout before emitting a warn log when connecting to bootstrapping beacons")
 	fs.Duration(BootstrapMaxTimeGetAncestorsKey, 50*time.Millisecond, "Max Time to spend fetching a container and its ancestors when responding to a GetAncestors")
 	fs.Uint(BootstrapAncestorsMaxContainersSentKey, 2000, "Max number of containers in an Ancestors message sent by this node")
 	fs.Uint(BootstrapAncestorsMaxContainersReceivedKey, 2000, "This node reads at most this many containers from an incoming Ancestors message")
@@ -275,9 +302,11 @@ func addNodeFlags(fs *flag.FlagSet) {
 	fs.Int(SnowAvalancheNumParentsKey, 5, "Number of vertexes for reference from each new vertex")
 	fs.Int(SnowAvalancheBatchSizeKey, 30, "Number of operations to batch in each new vertex")
 	fs.Int(SnowConcurrentRepollsKey, 4, "Minimum number of concurrent polls for finalizing consensus")
-	fs.Int(SnowOptimalProcessingKey, 50, "Optimal number of processing vertices in consensus")
+	fs.Int(SnowOptimalProcessingKey, 50, "Optimal number of processing containers in consensus")
 	fs.Int(SnowMaxProcessingKey, 1024, "Maximum number of processing items to be considered healthy")
 	fs.Duration(SnowMaxTimeProcessingKey, 2*time.Minute, "Maximum amount of time an item should be processing and still be healthy")
+	fs.Uint(SnowMixedQueryNumPushVdrKey, 10, fmt.Sprintf("If this node is a validator, when a container is inserted into consensus, send a Push Query to %s validators and a Pull Query to the others. Must be <= k.", SnowMixedQueryNumPushVdrKey))
+	fs.Uint(SnowMixedQueryNumPushNonVdrKey, 0, fmt.Sprintf("If this node is not a validator, when a container is inserted into consensus, send a Push Query to %s validators and a Pull Query to the others. Must be <= k.", SnowMixedQueryNumPushNonVdrKey))
 
 	// Metrics
 	fs.Bool(MeterVMsEnabledKey, true, "Enable Meter VMs to track VM performance with more granularity")
@@ -288,7 +317,6 @@ func addNodeFlags(fs *flag.FlagSet) {
 	fs.String(IpcsPathKey, "", "The directory (Unix) or named pipe name prefix (Windows) for IPC sockets")
 
 	// Indexer
-	fs.Bool(ResetProposerVMHeightIndexKey, false, "if true, proposervm height index is wiped on startup")
 	fs.Bool(IndexEnabledKey, false, "If true, index all accepted containers and transactions and expose them via an API")
 	fs.Bool(IndexAllowIncompleteKey, false, "If true, allow running the node in such a way that could cause an index to miss transactions. Ignored if index is disabled")
 
@@ -309,6 +337,32 @@ func addNodeFlags(fs *flag.FlagSet) {
 	// Delays
 	fs.Duration(NetworkInitialReconnectDelayKey, time.Second, "Initial delay duration must be waited before attempting to reconnect a peer")
 	fs.Duration(NetworkMaxReconnectDelayKey, time.Hour, "Maximum delay duration must be waited before attempting to reconnect a peer")
+
+	// System resource trackers
+	fs.Duration(SystemTrackerFrequencyKey, 500*time.Millisecond, "Frequency to check the real system usage of tracked processes. More frequent checks --> usage metrics are more accurate, but more expensive to track")
+	fs.Duration(SystemTrackerProcessingHalflifeKey, 15*time.Second, "Halflife to use for the processing requests tracker. Larger halflife --> usage metrics change more slowly")
+	fs.Duration(SystemTrackerCPUHalflifeKey, 15*time.Second, "Halflife to use for the cpu tracker. Larger halflife --> cpu usage metrics change more slowly")
+	fs.Duration(SystemTrackerDiskHalflifeKey, time.Minute, "Halflife to use for the disk tracker. Larger halflife --> disk usage metrics change more slowly")
+	fs.Uint64(SystemTrackerRequiredAvailableDiskSpaceKey, units.GiB/2, "Minimum number of available bytes on disk, under which the node will shutdown.")
+	fs.Uint64(SystemTrackerWarningThresholdAvailableDiskSpaceKey, units.GiB, fmt.Sprintf("Warning threshold for the number of available bytes on disk, under which the node will be considered unhealthy.  Must be >= [%s]", SystemTrackerRequiredAvailableDiskSpaceKey))
+
+	// CPU management
+	fs.Float64(CPUVdrAllocKey, float64(runtime.NumCPU()), "Maximum number of CPUs to allocate for use by validators. Value should be in range [0, total core count]")
+	fs.Float64(CPUMaxNonVdrUsageKey, .8*float64(runtime.NumCPU()), "Number of CPUs that if fully utilized, will rate limit all non-validators. Value should be in range [0, total core count]")
+	fs.Float64(CPUMaxNonVdrNodeUsageKey, float64(runtime.NumCPU())/8, "Maximum number of CPUs that a non-validator can utilize. Value should be in range [0, total core count]")
+
+	// Disk management
+	fs.Float64(DiskVdrAllocKey, 1000*units.GiB, "Maximum number of disk reads/writes per second to allocate for use by validators. Must be > 0")
+	fs.Float64(DiskMaxNonVdrUsageKey, 1000*units.GiB, "Number of disk reads/writes per second that, if fully utilized, will rate limit all non-validators. Must be >= 0")
+	fs.Float64(DiskMaxNonVdrNodeUsageKey, 1000*units.GiB, "Maximum number of disk reads/writes per second that a non-validator can utilize. Must be >= 0")
+
+	// Opentelemetry tracing
+	fs.Bool(TracingEnabledKey, false, "If true, enable opentelemetry tracing")
+	fs.String(TracingExporterTypeKey, trace.GRPC.String(), fmt.Sprintf("Type of exporter to use for tracing. Options are [%s, %s]", trace.GRPC, trace.HTTP))
+	fs.String(TracingEndpointKey, "localhost:4317", "The endpoint to send trace data to")
+	fs.Bool(TracingInsecureKey, true, "If true, don't use TLS when sending trace data")
+	fs.Float64(TracingSampleRateKey, 0.1, "The fraction of traces to sample. If >= 1, always sample. If <= 0, never sample")
+	// TODO add flag to take in headers to send from exporter
 }
 
 // BuildFlagSet returns a complete set of flags for avalanchego
@@ -319,4 +373,27 @@ func BuildFlagSet() *flag.FlagSet {
 	addProcessFlags(fs)
 	addNodeFlags(fs)
 	return fs
+}
+
+// GetExpandedArg gets the string in viper corresponding to [key] and expands
+// any variables using the OS env. If the [AvalancheGoDataDirVar] var is used,
+// we expand the value of the variable with the string in viper corresponding to
+// [DataDirKey].
+func GetExpandedArg(v *viper.Viper, key string) string {
+	return GetExpandedString(v, v.GetString(key))
+}
+
+// GetExpandedString expands [s] with any variables using the OS env. If the
+// [AvalancheGoDataDirVar] var is used, we expand the value of the variable with
+// the string in viper corresponding to [DataDirKey].
+func GetExpandedString(v *viper.Viper, s string) string {
+	return os.Expand(
+		s,
+		func(strVar string) string {
+			if strVar == AvalancheGoDataDirVar {
+				return os.ExpandEnv(v.GetString(DataDirKey))
+			}
+			return os.Getenv(strVar)
+		},
+	)
 }

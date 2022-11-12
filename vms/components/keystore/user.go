@@ -1,4 +1,4 @@
-// Copyright (C) 2019-2021, Ava Labs, Inc. All rights reserved.
+// Copyright (C) 2019-2022, Ava Labs, Inc. All rights reserved.
 // See the file LICENSE for licensing terms.
 
 package keystore
@@ -25,7 +25,7 @@ var (
 
 	errMaxAddresses = fmt.Errorf("keystore user has reached its limit of %d addresses", maxKeystoreAddresses)
 
-	_ User = &user{}
+	_ User = (*user)(nil)
 )
 
 type User interface {

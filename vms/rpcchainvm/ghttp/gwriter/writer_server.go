@@ -1,4 +1,4 @@
-// Copyright (C) 2019-2021, Ava Labs, Inc. All rights reserved.
+// Copyright (C) 2019-2022, Ava Labs, Inc. All rights reserved.
 // See the file LICENSE for licensing terms.
 
 package gwriter
@@ -10,11 +10,11 @@ import (
 	writerpb "github.com/ava-labs/avalanchego/proto/pb/io/writer"
 )
 
-var _ writerpb.WriterServer = &Server{}
+var _ writerpb.WriterServer = (*Server)(nil)
 
 // Server is an http.Handler that is managed over RPC.
 type Server struct {
-	writerpb.UnimplementedWriterServer
+	writerpb.UnsafeWriterServer
 	writer io.Writer
 }
 

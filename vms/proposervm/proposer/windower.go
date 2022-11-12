@@ -1,4 +1,4 @@
-// Copyright (C) 2019-2021, Ava Labs, Inc. All rights reserved.
+// Copyright (C) 2019-2022, Ava Labs, Inc. All rights reserved.
 // See the file LICENSE for licensing terms.
 
 package proposer
@@ -21,13 +21,13 @@ const (
 	MaxDelay       = MaxWindows * WindowDuration
 )
 
-var _ Windower = &windower{}
+var _ Windower = (*windower)(nil)
 
 type Windower interface {
 	Delay(
 		chainHeight,
 		pChainHeight uint64,
-		validatorID ids.ShortID,
+		validatorID ids.NodeID,
 	) (time.Duration, error)
 }
 
@@ -50,8 +50,8 @@ func New(state validators.State, subnetID, chainID ids.ID) Windower {
 	}
 }
 
-func (w *windower) Delay(chainHeight, pChainHeight uint64, validatorID ids.ShortID) (time.Duration, error) {
-	if validatorID == ids.ShortEmpty {
+func (w *windower) Delay(chainHeight, pChainHeight uint64, validatorID ids.NodeID) (time.Duration, error) {
+	if validatorID == ids.EmptyNodeID {
 		return MaxDelay, nil
 	}
 

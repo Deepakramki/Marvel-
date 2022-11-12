@@ -1,4 +1,4 @@
-// Copyright (C) 2019-2021, Ava Labs, Inc. All rights reserved.
+// Copyright (C) 2019-2022, Ava Labs, Inc. All rights reserved.
 // See the file LICENSE for licensing terms.
 
 package consistent
@@ -12,8 +12,8 @@ import (
 )
 
 var (
-	_ Ring       = &hashRing{}
-	_ btree.Item = &ringItem{}
+	_ Ring       = (*hashRing)(nil)
+	_ btree.Item = (*ringItem)(nil)
 
 	errEmptyRing = errors.New("ring doesn't have any members")
 )

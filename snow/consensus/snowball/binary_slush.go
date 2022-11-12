@@ -1,4 +1,4 @@
-// Copyright (C) 2019-2021, Ava Labs, Inc. All rights reserved.
+// Copyright (C) 2019-2022, Ava Labs, Inc. All rights reserved.
 // See the file LICENSE for licensing terms.
 
 package snowball
@@ -7,7 +7,7 @@ import (
 	"fmt"
 )
 
-var _ BinarySlush = &binarySlush{}
+var _ BinarySlush = (*binarySlush)(nil)
 
 // binarySlush is the implementation of a binary slush instance
 type binarySlush struct {

@@ -1,4 +1,4 @@
-// Copyright (C) 2019-2021, Ava Labs, Inc. All rights reserved.
+// Copyright (C) 2019-2022, Ava Labs, Inc. All rights reserved.
 // See the file LICENSE for licensing terms.
 
 package plugin
@@ -15,7 +15,7 @@ import (
 
 // Server wraps a node so it can be served with the hashicorp plugin harness
 type Server struct {
-	pluginpb.UnimplementedNodeServer
+	pluginpb.UnsafeNodeServer
 	app app.App
 }
 
